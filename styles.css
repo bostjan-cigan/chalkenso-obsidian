@@ -1,0 +1,532 @@
+/* Chalkenso — styles. */
+
+/* ---- Settings ---- */
+.chalkenso-dev-banner {
+  padding: 0.5em 0.75em;
+  border-radius: var(--radius-s);
+  background: rgba(var(--color-orange-rgb), 0.15);
+  color: var(--color-orange);
+}
+
+.chalkenso-section-heading {
+  margin-top: 1.5em;
+}
+
+.chalkenso-token-input {
+  min-width: 16rem;
+  font-family: var(--font-monospace);
+}
+
+.chalkenso-verify-status {
+  margin-top: 0.35rem;
+  font-size: var(--font-ui-smaller);
+}
+
+.chalkenso-verify-ok {
+  color: var(--text-success);
+}
+
+.chalkenso-verify-error {
+  color: var(--text-error);
+}
+
+/* What to sync: one checkbox row per curriculum and group curriculum. */
+.chalkenso-item-group {
+  margin: 1em 0 0.25em;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.chalkenso-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  padding: 0.45em 0.5em;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.chalkenso-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.chalkenso-item input[type='checkbox'] {
+  margin-top: 0.2em;
+  flex-shrink: 0;
+}
+
+.chalkenso-item.is-changed .chalkenso-item-name {
+  color: var(--text-accent);
+}
+
+.chalkenso-item-text {
+  min-width: 0;
+}
+
+.chalkenso-item-name {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chalkenso-item-desc {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.chalkenso-selection-actions {
+  margin-top: 0.75em;
+}
+
+/* List in confirmation dialogs. */
+.chalkenso-confirm-list {
+  max-height: 16em;
+  margin: 0.35em 0 0;
+  padding-left: 1.2em;
+  overflow-y: auto;
+  font-size: var(--font-ui-smaller);
+  font-family: var(--font-monospace);
+  user-select: text;
+}
+
+/* Recent problems (settings section and modal). */
+.chalkenso-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  max-height: 22em;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.chalkenso-problem {
+  padding: 0.5em 0.75em;
+  border-left: 3px solid var(--color-red);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  background: rgba(var(--color-red-rgb), 0.08);
+}
+
+.chalkenso-problem-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.chalkenso-problem-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- Status bar ---- */
+.chalkenso-statusbar,
+.chalkenso-lesson-statusbar,
+.chalkenso-arc-statusbar,
+.chalkenso-changes-statusbar,
+.chalkenso-plan-statusbar {
+  cursor: pointer;
+}
+
+.chalkenso-statusbar,
+.chalkenso-arc-statusbar,
+.chalkenso-changes-statusbar,
+.chalkenso-plan-statusbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.chalkenso-statusbar-icon,
+.chalkenso-arc-icon,
+.chalkenso-plan-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chalkenso-statusbar-icon svg,
+.chalkenso-plan-icon svg {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.chalkenso-arc-icon svg {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.chalkenso-arc-statusbar.chalkenso-arc-unset {
+  color: var(--text-muted);
+}
+
+/* State of the open note, by colour where it matters. */
+.chalkenso-lesson-statusbar[data-chalkenso-status='pending'],
+.chalkenso-lesson-statusbar[data-chalkenso-status='readonly-edit'] {
+  color: var(--color-orange);
+}
+
+.chalkenso-lesson-statusbar[data-chalkenso-status='syncing'] {
+  color: var(--text-accent);
+}
+
+.chalkenso-lesson-statusbar[data-chalkenso-status='conflict'],
+.chalkenso-lesson-statusbar[data-chalkenso-status='orphaned'] {
+  color: var(--text-error);
+}
+
+.chalkenso-lesson-statusbar.chalkenso-dev {
+  color: var(--text-warning);
+}
+
+/* "Curriculum Updates · Plan: …" on feedback notes. */
+.chalkenso-plan-statusbar[data-plan-status='synced'] .chalkenso-plan-icon:last-child {
+  color: var(--color-green);
+}
+
+.chalkenso-plan-statusbar[data-plan-status='pending'] {
+  color: var(--color-orange);
+}
+
+.chalkenso-plan-statusbar[data-plan-status='uploading'] {
+  color: var(--text-accent);
+}
+
+.chalkenso-plan-statusbar[data-plan-status='uploading'] .chalkenso-plan-icon:last-child svg {
+  animation: chalkenso-spin 1s linear infinite;
+}
+
+.chalkenso-plan-statusbar[data-plan-status='empty'] {
+  color: var(--text-muted);
+}
+
+/* ---- File explorer ---- */
+
+/*
+ * Status dot of a lesson note. A real element (so it owns its own hover tooltip): a small solid
+ * circle right after the name, coloured by status.
+ */
+.chalkenso-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+  background: currentColor;
+}
+
+/* Published notes get a ring, so drafts and live notes are distinguishable at a glance. */
+.chalkenso-dot-published {
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 3px var(--color-green);
+}
+
+/* Folder roll-up dot — only while collapsed, since the expanded folder already shows each note. */
+.nav-folder:not(.is-collapsed) > .nav-folder-title > .chalkenso-folder-dot {
+  display: none;
+}
+
+.chalkenso-dot[data-chalkenso-status='synced'] {
+  color: var(--color-green);
+}
+
+/* Not in Chalkenso yet — neutral grey. */
+.chalkenso-dot[data-chalkenso-status='not-synced'] {
+  color: var(--text-faint);
+}
+
+/* Edited since the last sync — orange. */
+.chalkenso-dot[data-chalkenso-status='pending'] {
+  color: var(--color-orange);
+}
+
+/* Sync off for the note — a hollow ring. */
+.chalkenso-dot[data-chalkenso-status='disabled'] {
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+/* Changed on both sides — red; the server copy waits in _conflicts/. */
+.chalkenso-dot[data-chalkenso-status='conflict'] {
+  color: var(--color-red);
+}
+
+/* Lesson deleted in Chalkenso, note kept because it has local edits — hollow red ring. */
+.chalkenso-dot[data-chalkenso-status='orphaned'] {
+  color: var(--color-red);
+  background: transparent;
+  border: 1.5px solid currentColor;
+}
+
+/* Edited in a read-only folder: never uploaded — hollow orange ring. */
+.chalkenso-dot[data-chalkenso-status='readonly-edit'] {
+  color: var(--color-orange);
+  background: transparent;
+  border: 1.5px solid currentColor;
+}
+
+/* Uploading — a spinning ring. */
+.chalkenso-dot[data-chalkenso-status='syncing'] {
+  background: transparent;
+  border: 1.5px solid var(--text-accent);
+  border-top-color: transparent;
+  animation: chalkenso-spin 0.8s linear infinite;
+}
+
+@keyframes chalkenso-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* What a folder is: Chalkenso (the root folder), Curriculums, Groups, … */
+/* Each kind of folder gets its own icon (set in main.js) and colour. */
+.chalkenso-folder-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  align-self: center;
+  flex-shrink: 0;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+
+.chalkenso-folder-tag-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chalkenso-folder-tag-icon svg {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.chalkenso-folder-tag[data-chalkenso-tag='root'] {
+  background: rgba(var(--color-blue-rgb), 0.15);
+  color: var(--color-blue);
+}
+
+.chalkenso-folder-tag[data-chalkenso-tag='curriculums'],
+.chalkenso-folder-tag[data-chalkenso-tag='curriculum'] {
+  background: rgba(var(--color-green-rgb), 0.15);
+  color: var(--color-green);
+}
+
+.chalkenso-folder-tag[data-chalkenso-tag='groups'],
+.chalkenso-folder-tag[data-chalkenso-tag='group'] {
+  background: rgba(var(--color-purple-rgb), 0.15);
+  color: var(--color-purple);
+}
+
+/* Lock after a read-only folder's name (explorer) and on read-only items (settings). */
+.chalkenso-readonly-lock {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--text-muted);
+  align-self: center;
+}
+
+.chalkenso-readonly-lock svg {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+/* ---- Changes preview ---- */
+.chalkenso-changes-statusbar {
+  color: var(--text-accent);
+}
+
+.chalkenso-changes-modal {
+  width: min(52rem, 92vw);
+}
+
+.chalkenso-changes-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0.75em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.chalkenso-changes-kind {
+  padding: 0 6px;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+
+.chalkenso-changes-kind-create {
+  background: rgba(var(--color-green-rgb), 0.15);
+  color: var(--color-green);
+}
+
+.chalkenso-changes-kind-update {
+  background: rgba(var(--color-orange-rgb), 0.15);
+  color: var(--color-orange);
+}
+
+.chalkenso-changes-kind-error {
+  background: rgba(var(--color-red-rgb), 0.15);
+  color: var(--text-error);
+}
+
+.chalkenso-changes-note {
+  margin: 0.25em 0 0.5em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.chalkenso-changes-section {
+  margin: 0.9em 0 0.35em;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.chalkenso-changes-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2em 1em;
+  font-size: var(--font-ui-small);
+}
+
+.chalkenso-changes-field-name {
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+.chalkenso-diff-removed-text {
+  color: var(--text-error);
+  text-decoration: line-through;
+}
+
+.chalkenso-diff-added-text {
+  color: var(--color-green);
+}
+
+/* Body diff: one row per line, the server's lines in red and the note's in green. */
+.chalkenso-diff {
+  max-height: 55vh;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  line-height: 1.5;
+  user-select: text;
+}
+
+.chalkenso-diff-line {
+  display: flex;
+  padding-right: 0.5em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chalkenso-diff-prefix {
+  flex-shrink: 0;
+  width: 1.5em;
+  text-align: center;
+  user-select: none;
+  color: var(--text-faint);
+}
+
+.chalkenso-diff-removed {
+  background: rgba(var(--color-red-rgb), 0.15);
+}
+
+.chalkenso-diff-added {
+  background: rgba(var(--color-green-rgb), 0.15);
+}
+
+.chalkenso-diff-fold {
+  padding: 0.1em 0 0.1em 1.5em;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+}
+
+.chalkenso-diff-fold:hover {
+  color: var(--text-normal);
+}
+
+/* ---- Lesson layout: image rows and [!columns] (rendered the same way in Chalkenso) ---- */
+.markdown-rendered p:has(> img + img),
+.markdown-rendered p:has(> .internal-embed.image-embed + .internal-embed.image-embed) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1em;
+}
+
+.markdown-rendered p:has(> .internal-embed.image-embed + .internal-embed.image-embed) br {
+  display: none;
+}
+
+.callout[data-callout="columns"],
+.callout[data-callout="column"] {
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  mix-blend-mode: normal;
+}
+
+.callout[data-callout="columns"] > .callout-title,
+.callout[data-callout="column"] > .callout-title {
+  display: none;
+}
+
+.callout[data-callout="columns"] > .callout-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5em;
+  padding: 0;
+}
+
+.callout[data-callout="column"] {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.callout[data-callout="column"] > .callout-content {
+  padding: 0;
+}
+
+.callout[data-callout="column"] > .callout-content > :first-child {
+  margin-top: 0;
+}
+
+.callout[data-callout="column"][data-callout-metadata="25"] { flex: 0 0 25%; }
+.callout[data-callout="column"][data-callout-metadata="33"] { flex: 0 0 33%; }
+.callout[data-callout="column"][data-callout-metadata="40"] { flex: 0 0 40%; }
+.callout[data-callout="column"][data-callout-metadata="42"] { flex: 0 0 42%; }
+.callout[data-callout="column"][data-callout-metadata="50"] { flex: 0 0 50%; }
+.callout[data-callout="column"][data-callout-metadata="58"] { flex: 0 0 58%; }
+.callout[data-callout="column"][data-callout-metadata="60"] { flex: 0 0 60%; }
+.callout[data-callout="column"][data-callout-metadata="66"] { flex: 0 0 66%; }
+.callout[data-callout="column"][data-callout-metadata="75"] { flex: 0 0 75%; }
+
+@media (max-width: 640px) {
+  .callout[data-callout="columns"] > .callout-content {
+    flex-direction: column;
+  }
+
+  .callout[data-callout="column"] {
+    flex: 1 1 auto !important;
+    width: 100%;
+  }
+}
