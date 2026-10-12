@@ -530,3 +530,15 @@
     width: 100%;
   }
 }
+
+/* Organisations: each one's folder (explorer tag) and its heading under "What to sync". */
+.chalkenso-folder-tag[data-chalkenso-tag='organization'] {
+  background: rgba(var(--color-cyan-rgb), 0.15);
+  color: var(--color-cyan);
+}
+
+.chalkenso-organisation-heading {
+  margin: 1.4em 0 0.1em;
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}

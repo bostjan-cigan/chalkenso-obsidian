@@ -3,10 +3,12 @@
  *
  * Syncs course curricula between a vault and Chalkenso (/api/sync/*, two-way: download, upload,
  * sync): one folder per course version or group curriculum, feedback notes with revision plans,
- * conflicts and lesson images. One sync token (usr_…) covers everything its owner can reach. You
- * pick a root folder and tick what to keep from the list Chalkenso offers (`/me`); each choice gets
- * its folder in the root folder (Curriculums/…, Groups/…) and is downloaded. A folder's workspace
- * (version) is sent as the X-Curriculum-Version-Id header.
+ * conflicts and lesson images. A sync token (usr_…) works in one organisation, so you add each
+ * organisation you belong to with its own token; each gets its folder in the root folder
+ * (`<root>/<Organisation>/Curriculums/…`, `…/Groups/…`). You tick what to keep from the list each
+ * organisation offers (`/me`); each choice gets its folder there and is downloaded, and its requests
+ * use that organisation's token. A folder's workspace (version) is sent as the
+ * X-Curriculum-Version-Id header.
  *
  * Layout: Curriculum module · Host (shared settings, settings tab, explorer).
  */
@@ -18,17 +20,19 @@ const { AbstractInputSuggest, FuzzySuggestModal, Menu, Modal, Notice, Plugin, Pl
 // ==============================================================================================
 
 /** Settings shared with the curriculum module (edited under "Connection"). */
-const SHARED_KEYS = ['baseUrl', 'devMode', 'devBaseUrl', 'token', 'devToken'];
+const SHARED_KEYS = ['baseUrl', 'devMode', 'devBaseUrl'];
 const DEFAULT_BASE_URL = 'https://chalkenso.com';
 const DEFAULT_DEV_BASE_URL = 'http://localhost:3100';
 const DEFAULT_ROOT_FOLDER = 'Chalkenso';
 /** Where a sync token is created in Chalkenso (the "Tokens" link at the bottom of the admin sidebar). */
 const TOKEN_PAGE_PATH = '/admin/api-tokens';
 /**
- * `token` / `devToken`: the sync token (usr_…) for the server / the dev server. `rootFolder`: the
- * folder everything is kept in (null = none chosen, nothing syncs).
+ * `rootFolder`: the folder everything is kept in (null = none chosen, nothing syncs). `connections`:
+ * one per organisation and server, `{ id, env: 'prod' | 'dev', token, folder, curriculumsFolder,
+ * groupsFolder, organizationId, organizationName, userId }`. A sync token (usr_…) works in the one
+ * organisation it was made in; that organisation's folders live in its `folder` (`<root>/<name>`).
  */
-const GENERAL_DEFAULTS = { baseUrl: DEFAULT_BASE_URL, devMode: false, devBaseUrl: DEFAULT_DEV_BASE_URL, token: '', devToken: '', rootFolder: DEFAULT_ROOT_FOLDER };
+const GENERAL_DEFAULTS = { baseUrl: DEFAULT_BASE_URL, devMode: false, devBaseUrl: DEFAULT_DEV_BASE_URL, rootFolder: DEFAULT_ROOT_FOLDER, connections: [] };
 const EXPLORER_SELECTOR = '.chalkenso-dot, .chalkenso-folder-tag, .chalkenso-readonly-lock';
 
 // ----------------------------------------------------------------------------------------------
@@ -761,29 +765,23 @@ const Curriculum = (() => {
             : mapping.versionLabel;
     }
     /**
-     * Folder mappings are `{ path, env, versionId | devVersionId, courseTitle, versionLabel }`:
-     * the version is one of the workspaces `/api/sync/me` lists for the sync token. `token` and
-     * `devToken` are the shared sync tokens (Connection settings).
+     * Folder mappings are `{ path, env, connection, versionId | devVersionId, courseTitle,
+     * versionLabel }`: `connection` is the organisation the folder belongs to (see `connectionOf`),
+     * and the version is one of the workspaces its `/api/sync/me` lists.
      */
     const DEFAULT_SETTINGS = {
         baseUrl: '',
         folders: [],
-        /** Container of the curriculum folders (tagged "Curriculums"); set from the root folder, follows renames. */
-        curriculumsFolder: '',
-        /** Container of the group-curriculum folders (tagged "Groups"); set from the root folder, follows renames. */
-        groupsFolder: 'Groups',
         defaultStatus: 'DRAFT',
         devMode: false,
         devBaseUrl: '',
-        token: '',
-        devToken: '',
     };
     /**
-     * Folders chosen in settings get a mapping `{ path, env, versionId | devVersionId, courseTitle,
-     * versionLabel, … }`; a group curriculum's also has `{ managed: 'group', groupId, groupName,
-     * userId, … }`. `env` ('prod' | 'dev') keeps the two servers' folders apart: a mapping of the other
-     * environment, or one outside the root folder, is ignored entirely (not synced, not painted, not
-     * cleaned up).
+     * Folders chosen in settings get a mapping `{ path, env, connection, versionId | devVersionId,
+     * courseTitle, versionLabel, … }`; a group curriculum's also has `{ managed: 'group', groupId,
+     * groupName, userId, … }`. `env` ('prod' | 'dev') keeps the two servers' folders apart: a mapping
+     * of the other environment, of an organisation no longer connected, or outside the root folder is
+     * ignored entirely (not synced, not painted, not cleaned up).
      */
     const MANAGED_GROUP = 'group';
     function isManagedGroup(mapping) {
@@ -792,20 +790,46 @@ const Curriculum = (() => {
     function activeEnv(settings) {
         return settings.devMode ? 'dev' : 'prod';
     }
-    /** False only for a mapping of the other environment (dev / production). */
-    function isInActiveEnv(settings, mapping) {
-        return mapping?.env === activeEnv(settings) && isInsideRootFolder(mapping.path);
+    // ---- curriculum/organisations
+    /**
+     * A sync token works in one organisation, so each organisation has its own connection in the
+     * host's settings: `{ id, env, token, folder, curriculumsFolder, groupsFolder, organizationId,
+     * organizationName, userId }`. Its folder (`<root>/<Organisation>`) holds its Curriculums and
+     * Groups folders; every folder mapping names its connection, and its requests use that token.
+     */
+    function connectionOf(mapping) {
+        const connection = activeHost?.connectionById(mapping?.connection) ?? null;
+        return connection && connection.env === mapping.env ? connection : null;
     }
-    /** Whether a mapping takes part in syncing: every folder of the active server does. */
+    /** The organisations connected for the active server (dev or production). */
+    function activeConnections() {
+        return activeHost?.activeConnections() ?? [];
+    }
+    /** True when the active server has a URL and at least one organisation with a token. */
+    function hasActiveConnection(settings) {
+        return Boolean(activeBaseUrl(settings)) && activeConnections().some((connection) => connection.token);
+    }
+    /** An organisation's Curriculums / Groups folder ('' until its folder is known). */
+    function curriculumsRootOf(connection) {
+        return normalizeFolderPath(String(connection?.curriculumsFolder ?? '').trim());
+    }
+    function groupsRootOf(connection) {
+        return normalizeFolderPath(String(connection?.groupsFolder ?? '').trim());
+    }
+    /** "Northwind Academy", or a stand-in until `/me` has named it. */
+    function organizationLabel(connection) {
+        return connection?.organizationName || 'your organisation';
+    }
+    /** False for a mapping of the other environment, of an organisation not connected, or outside the root folder. */
+    function isInActiveEnv(settings, mapping) {
+        return mapping?.env === activeEnv(settings) && isInsideRootFolder(mapping.path) && Boolean(connectionOf(mapping));
+    }
+    /** Whether a mapping takes part in syncing: every folder of the active server's organisations does. */
     function isMappingOn(settings, mapping) {
         return isInActiveEnv(settings, mapping);
     }
-    /** The groups parent folder (setting, defaults to `Groups`). */
-    function groupsRoot(settings) {
-        return normalizeFolderPath(String(settings.groupsFolder ?? '').trim()) || 'Groups';
-    }
     /** File-name-safe folder name, keeping the en dash and spaces. */
-    function sanitizeFolderName(value) {
+    function sanitizeFolderName(value, fallback = 'Group') {
         const cleaned = String(value ?? '')
             .replace(/[\\/:*?"<>|#^[\]]+/g, ' ')
             .replace(/\s+/g, ' ')
@@ -813,16 +837,17 @@ const Curriculum = (() => {
             .replace(/^\.+/, '')
             .slice(0, 120)
             .trim();
-        return cleaned || 'Group';
+        return cleaned || fallback;
     }
     /**
-     * Default folder of a workspace: `<Groups>/<Course title> – <Group name>` for a group curriculum,
-     * `<Curriculums>/<Course title> – <version label>` otherwise (plus ` (dev)` for the dev server).
+     * Default folder of a workspace in its organisation: `<Groups>/<Course title> – <Group name>` for
+     * a group curriculum, `<Curriculums>/<Course title> – <version label>` otherwise (plus ` (dev)` for
+     * the dev server).
      */
-    function workspaceFolderPath(settings, workspace) {
+    function workspaceFolderPath(settings, workspace, connection) {
         const group = workspace.kind === 'group';
         const name = sanitizeFolderName(`${workspace.course?.title ?? 'Course'} – ${group ? workspace.group?.name ?? workspace.label ?? 'Group' : workspace.label ?? 'Version'}`);
-        const parent = group ? groupsRoot(settings) : normalizeFolderPath(settings.curriculumsFolder ?? '');
+        const parent = group ? groupsRootOf(connection) : curriculumsRootOf(connection);
         return `${parent ? `${parent}/` : ''}${name}${settings.devMode ? ' (dev)' : ''}`;
     }
     /** The plugin-written README of a group folder. */
@@ -847,10 +872,6 @@ const Curriculum = (() => {
     function activeBaseUrl(settings) {
         return settings.devMode ? settings.devBaseUrl : settings.baseUrl;
     }
-    /** The sync token for the active environment (the dev token in dev mode). */
-    function activeToken(settings) {
-        return (settings.devMode ? settings.devToken : settings.token) ?? '';
-    }
     /** A folder's workspace (curriculum version id) for the active environment. */
     function activeVersionId(settings, mapping) {
         return (settings.devMode ? mapping.devVersionId : mapping.versionId) ?? '';
@@ -863,9 +884,9 @@ const Curriculum = (() => {
             mapping.versionId = versionId;
         }
     }
-    /** Where a mapping's requests go: server, sync token, and the version header. */
+    /** Where a mapping's requests go: server, its organisation's sync token, and the version header. */
     function syncTarget(settings, mapping) {
-        return { baseUrl: activeBaseUrl(settings), token: activeToken(settings), versionId: activeVersionId(settings, mapping) };
+        return { baseUrl: activeBaseUrl(settings), token: connectionOf(mapping)?.token ?? '', versionId: activeVersionId(settings, mapping) };
     }
     /** Dropdown label for a `/me` workspace, e.g. "Web Development — v3 (Draft)". */
     function workspaceLabel(workspace) {
@@ -2606,11 +2627,10 @@ const Curriculum = (() => {
             });
         }
         async loadSettings() {
-            this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-            this.settings.folders = this.settings.folders ?? [];
-            if (!this.settings.groupsFolder) {
-                this.settings.groupsFolder = DEFAULT_SETTINGS.groupsFolder;
-            }
+            // Only this version's settings, and only folders that belong to an organisation.
+            const data = (await this.loadData()) ?? {};
+            this.settings = Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, value]) => [key, key in data ? data[key] : value]));
+            this.settings.folders = (Array.isArray(this.settings.folders) ? this.settings.folders : []).filter((mapping) => mapping?.connection);
             setDevMode(this.settings.devMode);
         }
         async saveSettings() {
@@ -2629,13 +2649,16 @@ const Curriculum = (() => {
         // ------------------------------------------------------------------------------------------
         // Permissions (from /me)
         // ------------------------------------------------------------------------------------------
-        /** The `/me` workspace of a mapping (active server), or null when `/me` isn't loaded or doesn't list it. */
+        /**
+         * The `/me` workspace of a mapping (its organisation, active server), or null when that `/me`
+         * isn't loaded or doesn't list it.
+         */
         workspaceFor(mapping) {
             const versionId = mapping ? activeVersionId(this.settings, mapping) : '';
             if (!versionId) {
                 return null;
             }
-            return (this.host.currentWorkspaces() ?? []).find((workspace) => workspace.id === versionId) ?? null;
+            return (this.host.currentWorkspaces(mapping.connection) ?? []).find((workspace) => workspace.id === versionId) ?? null;
         }
         /** The mapping's permissions from `/me`, or null when unknown (offline, `/me` failed, not listed). */
         workspacePermissions(mapping) {
@@ -2675,8 +2698,9 @@ const Curriculum = (() => {
         }
         /**
          * Why a managed group mapping must not sync right now: `closed` (a 410 said so), `gone` (a
-         * successful `/me` of the same account doesn't list it), `other-account` (the token belongs to
-         * someone else), or null. A failed / missing `/me` never makes a group gone.
+         * successful `/me` of its organisation's token doesn't list it), `other-account` (the token
+         * belongs to someone else), or null. A failed / missing `/me` never makes a group gone, and
+         * only the group's own organisation decides: another organisation's list never does.
          */
         groupState(mapping) {
             if (!isManagedGroup(mapping)) {
@@ -2686,7 +2710,7 @@ const Curriculum = (() => {
             if (this.closedVersions.has(versionId)) {
                 return 'closed';
             }
-            const me = this.host.currentMe()?.data;
+            const me = this.host.currentMe(mapping.connection)?.data;
             if (!me || !Array.isArray(me.workspaces)) {
                 return null;
             }
@@ -2696,22 +2720,23 @@ const Curriculum = (() => {
             return me.workspaces.some((workspace) => workspace.id === versionId) ? null : 'gone';
         }
         /**
-         * Called after every successful `/me` (settings open, Refresh, start of Sync / Download all):
-         * refreshes the cached names of the group folders you chose, keeps their README current, and
-         * returns the mappings whose workspace is no longer listed (to clean up). New group workspaces
-         * are not added here; they are offered as checkboxes in settings.
-         * The folder of an existing mapping is never moved or renamed; a renamed folder is followed.
+         * Called after every successful `/me` of an organisation (settings open, Refresh, start of Sync /
+         * Download all): refreshes the cached names of that organisation's group folders you chose,
+         * keeps their README current, and returns its mappings whose workspace is no longer listed (to
+         * clean up). New group workspaces are not added here; they are offered as checkboxes in
+         * settings. The folder of an existing mapping is never moved or renamed; a renamed folder is
+         * followed.
          */
-        async reconcileGroups(me) {
+        async reconcileGroups(me, connection) {
             const result = { gone: [] };
-            if (!me || !Array.isArray(me.workspaces)) {
+            if (!me || !Array.isArray(me.workspaces) || !connection) {
                 return result;
             }
             const userId = me.user?.id ?? null;
             let changed = false;
             for (const workspace of me.workspaces.filter((candidate) => candidate.kind === 'group')) {
                 const mapping = this.managedMappingFor(workspace.id);
-                if (!mapping) {
+                if (!mapping || mapping.connection !== connection.id) {
                     continue;
                 }
                 if (this.applyGroupFields(mapping, workspace, userId)) {
@@ -2728,7 +2753,7 @@ const Curriculum = (() => {
                 }
             }
             for (const mapping of this.settings.folders) {
-                if (isManagedGroup(mapping) && isInActiveEnv(this.settings, mapping) && this.groupState(mapping) === 'gone') {
+                if (isManagedGroup(mapping) && mapping.connection === connection.id && isInActiveEnv(this.settings, mapping) && this.groupState(mapping) === 'gone') {
                     result.gone.push(mapping);
                 }
             }
@@ -2762,21 +2787,26 @@ const Curriculum = (() => {
                 activeVersionId(this.settings, mapping) === versionId) ?? null;
         }
         /**
-         * Chosen in settings: gives a workspace its folder under the root folder (`Curriculums/…` or
-         * `Groups/…`), creating the folder (and a group's README). An existing folder of that name is
-         * reused, so its notes are matched to the lessons by the first download. `path` maps a folder
-         * of your choice instead ("Map folder to a curriculum version"). Returns the mapping; the
-         * caller downloads it.
+         * Chosen in settings: gives a workspace its folder in its organisation's folder
+         * (`<Organisation>/Curriculums/…` or `<Organisation>/Groups/…`), creating the folder (and a
+         * group's README). An existing folder of that name is reused, so its notes are matched to the
+         * lessons by the first download. `path` maps a folder of your choice instead ("Map folder to a
+         * curriculum version"). Returns the mapping; the caller downloads it.
          */
-        async addWorkspaceFolder(workspace, userId, path = null) {
+        async addWorkspaceFolder(workspace, connection, path = null) {
             const existing = this.mappingForWorkspace(workspace.id);
             if (existing) {
                 return existing;
             }
+            if (!path && !curriculumsRootOf(connection)) {
+                throw new Error(`${organizationLabel(connection)} has no folder yet; open Settings → Chalkenso once its account has loaded.`);
+            }
             const group = workspace.kind === 'group';
+            const userId = this.host.currentMe(connection.id)?.data?.user?.id ?? connection.userId ?? null;
             const mapping = {
-                path: path ? normalizeFolderPath(path) : this.freeGroupFolderPath(workspaceFolderPath(this.settings, workspace)),
+                path: path ? normalizeFolderPath(path) : this.freeGroupFolderPath(workspaceFolderPath(this.settings, workspace, connection)),
                 env: activeEnv(this.settings),
+                connection: connection.id,
                 versionId: '',
                 devVersionId: '',
                 ...(group ? { managed: MANAGED_GROUP } : {}),
@@ -2937,7 +2967,7 @@ const Curriculum = (() => {
                 return 'removed';
             }
             const plan = await this.planGroupCleanup(mapping);
-            const detachRoot = plan.detach.length > 0 ? this.freeDetachRoot(root) : null;
+            const detachRoot = plan.detach.length > 0 ? this.freeDetachRoot(root, mapping) : null;
             if (plan.dirty.length > 0) {
                 const confirmed = await confirmList(this.app, {
                     title: reason === 'closed' ? 'Group curriculum closed' : 'Group curriculum no longer available',
@@ -3052,9 +3082,10 @@ const Curriculum = (() => {
             }
             return plan;
         }
-        /** `<Groups>/_detached/<folder name>`, or `… (2)`, … when that already exists. */
-        freeDetachRoot(root) {
-            const base = `${groupsRoot(this.settings)}/_detached/${root.split('/').pop()}`;
+        /** `<Groups>/_detached/<folder name>` (the group's organisation), or `… (2)`, … when that already exists. */
+        freeDetachRoot(root, mapping) {
+            const groups = groupsRootOf(connectionOf(mapping)) || root.split('/').slice(0, -1).join('/');
+            const base = `${groups ? `${groups}/` : ''}_detached/${root.split('/').pop()}`;
             const exists = (path) => Boolean(this.app.vault.getAbstractFileByPath(path));
             let path = base;
             for (let n = 2; exists(path); n++) {
@@ -3112,11 +3143,18 @@ const Curriculum = (() => {
             if (!activeBaseUrl(this.settings)) {
                 return 'set the server URL in Settings → Chalkenso first.';
             }
-            if (!activeToken(this.settings)) {
-                return 'paste your sync token (usr_…) in Settings → Chalkenso first.';
+            if (mapping?.env !== activeEnv(this.settings)) {
+                return `"${mapping.path || '/'}" belongs to the ${this.settings.devMode ? 'production' : 'dev'} server.`;
+            }
+            const connection = connectionOf(mapping);
+            if (!connection) {
+                return `"${mapping.path || '/'}" belongs to an organisation that is no longer connected (Settings → Chalkenso → Organisations).`;
+            }
+            if (!connection.token) {
+                return `paste the sync token (usr_…) for ${organizationLabel(connection)} in Settings → Chalkenso first.`;
             }
             if (!isMappingOn(this.settings, mapping)) {
-                return `"${mapping.path || '/'}" belongs to the ${this.settings.devMode ? 'production' : 'dev'} server.`;
+                return `"${mapping.path || '/'}" is outside the root folder (Settings → Chalkenso).`;
             }
             return null;
         }
@@ -3343,7 +3381,7 @@ const Curriculum = (() => {
         }
         /**
          * Folders that can be disconnected or mapped: every folder of the active server that is
-         * mapped, and every folder directly under the Curriculums and Groups folders (not `_…` ones
+         * mapped, and every folder directly under each organisation's Curriculums and Groups folders (not `_…` ones
          * such as `_detached`). `unmappedOnly` leaves out the mapped ones.
          */
         curriculumFolderCandidates(unmappedOnly = false) {
@@ -3355,7 +3393,8 @@ const Curriculum = (() => {
                     }
                 }
             }
-            for (const container of [normalizeFolderPath(this.settings.curriculumsFolder ?? ''), groupsRoot(this.settings)]) {
+            const containers = activeConnections().flatMap((connection) => [curriculumsRootOf(connection), groupsRootOf(connection)]).filter(Boolean);
+            for (const container of containers) {
                 const folder = container ? this.app.vault.getAbstractFileByPath(container) : null;
                 if (!(folder instanceof TFolder) || !isInsideRootFolder(folder.path)) {
                     continue;
@@ -3382,7 +3421,7 @@ const Curriculum = (() => {
             if (path === null) {
                 const candidates = this.curriculumFolderCandidates();
                 if (candidates.length === 0) {
-                    new Notice('Chalkenso: no curriculum folders to disconnect. Set the root folder in Settings → Chalkenso; folders directly under its Curriculums and Groups folders are listed.');
+                    new Notice('Chalkenso: no curriculum folders to disconnect. Add your organisation and set the root folder in Settings → Chalkenso; folders directly under each organisation’s Curriculums and Groups folders are listed.');
                     return;
                 }
                 new PathSuggestModal(this.app, candidates, 'Folder to disconnect from its previous server', (chosen) => void this.disconnectFolder(chosen)).open();
@@ -3436,14 +3475,14 @@ const Curriculum = (() => {
          * right away; its first sync offers to disconnect notes from a previous server.
          */
         async mapFolderToWorkspace(path = null) {
-            if (!activeBaseUrl(this.settings) || !activeToken(this.settings)) {
-                new Notice('Chalkenso: set the server URL and paste your sync token (usr_…) in Settings → Chalkenso first.');
+            if (!hasActiveConnection(this.settings)) {
+                new Notice('Chalkenso: set the server URL and add your organisation with its sync token (usr_…) in Settings → Chalkenso first.');
                 return;
             }
             if (path === null) {
                 const candidates = this.curriculumFolderCandidates(true);
                 if (candidates.length === 0) {
-                    new Notice('Chalkenso: no unmapped folders directly under the Curriculums or Groups folder of the root folder (Settings → Chalkenso).');
+                    new Notice('Chalkenso: no unmapped folders directly under an organisation’s Curriculums or Groups folder (Settings → Chalkenso).');
                     return;
                 }
                 new PathSuggestModal(this.app, candidates, 'Folder to sync with a curriculum version', (chosen) => void this.mapFolderToWorkspace(chosen)).open();
@@ -3453,19 +3492,26 @@ const Curriculum = (() => {
                 new Notice(`Chalkenso: "${path}" is already mapped.`);
                 return;
             }
-            const me = await this.host.loadMe(true);
+            // The folder's organisation: the one whose folder holds it (or the only one there is).
+            const connections = activeConnections().filter((candidate) => candidate.token);
+            const connection = this.host.connectionForPath(path) ?? (connections.length === 1 ? connections[0] : null);
+            if (!connection) {
+                new Notice(`Chalkenso: "${path}" isn't in an organisation's folder. Move it into the organisation's Curriculums or Groups folder first.`);
+                return;
+            }
+            const me = await this.host.loadMe(connection.id, true);
             if (!me) {
-                new Notice(`Chalkenso: could not load your account (${this.host.currentMe()?.error ?? 'unknown error'}).`);
+                new Notice(`Chalkenso: could not load your account in ${organizationLabel(connection)} (${this.host.currentMe(connection.id)?.error ?? 'unknown error'}).`);
                 return;
             }
             const workspaces = me.workspaces.filter((workspace) => !this.mappingForWorkspace(workspace.id));
             if (workspaces.length === 0) {
-                new Notice('Chalkenso: every curriculum version your account can reach already syncs with a folder.');
+                new Notice(`Chalkenso: every curriculum version you can reach in ${organizationLabel(connection)} already syncs with a folder.`);
                 return;
             }
-            new WorkspaceSuggestModal(this.app, workspaces, `Version for "${path}"`, (workspace) => void (async () => {
+            new WorkspaceSuggestModal(this.app, workspaces, `Version for "${path}" (${organizationLabel(connection)})`, (workspace) => void (async () => {
                 try {
-                    const mapping = await this.addWorkspaceFolder(workspace, me.user?.id ?? null, path);
+                    const mapping = await this.addWorkspaceFolder(workspace, connection, path);
                     await this.host.markSeen([{ key: `ws:${workspace.id}` }]);
                     new Notice(`Chalkenso: "${path}" now syncs with ${curriculumLabel(mapping) ?? workspaceLabel(workspace)}; downloading.`);
                     await this.runForMapping(mapping, 'download');
@@ -3561,12 +3607,12 @@ const Curriculum = (() => {
             }
             await this.runForMapping(mapping, action);
         }
-        /** Runs download / upload / sync for every curriculum folder of the active server. */
+        /** Runs download / upload / sync for every curriculum folder of the active server's organisations. */
         async runForAllMappings(action) {
-            // Fresh account first: new group folders are created (and filled by this run), closed ones cleaned up.
-            // Offline / failed: carry on with the folders we have; nothing is removed.
-            if (activeBaseUrl(this.settings) && activeToken(this.settings)) {
-                await this.host.loadMe(true);
+            // Fresh accounts first (every organisation): closed groups are cleaned up. Offline / failed:
+            // carry on with the folders we have; nothing is removed.
+            if (hasActiveConnection(this.settings)) {
+                await this.host.loadAllMe(true);
                 await this.groupCleanup;
             }
             const mappings = this.settings.folders.filter((mapping) => isMappingOn(this.settings, mapping) && !this.groupState(mapping));
@@ -3579,22 +3625,31 @@ const Curriculum = (() => {
             }
         }
         /**
-         * Download or sync every group-curriculum folder in one go (Groups folder menu, command,
-         * settings): reloads the account first, so new groups get their folder and closed ones are
-         * cleaned up, then runs each group folder this account can reach.
+         * Download or sync every group-curriculum folder in one go (a Groups folder's menu, command,
+         * settings): of one organisation (`connectionId`, its Groups folder) or of all of them. Reloads
+         * each account first, so closed groups are cleaned up, then runs each group folder it can reach.
          */
-        async runForGroupMappings(action) {
-            if (!activeBaseUrl(this.settings) || !activeToken(this.settings)) {
-                new Notice('Chalkenso: set the server URL and paste your sync token (usr_…) in Settings → Chalkenso first.');
+        async runForGroupMappings(action, connectionId = null) {
+            if (!hasActiveConnection(this.settings)) {
+                new Notice('Chalkenso: set the server URL and add your organisation with its sync token (usr_…) in Settings → Chalkenso first.');
                 return;
             }
-            const me = await this.host.loadMe(true);
+            const connections = activeConnections().filter((connection) => connection.token && (!connectionId || connection.id === connectionId));
+            const loaded = new Set();
+            for (const connection of connections) {
+                if (await this.host.loadMe(connection.id, true)) {
+                    loaded.add(connection.id);
+                }
+                else {
+                    new Notice(`Chalkenso: could not load your account in ${organizationLabel(connection)} (${this.host.currentMe(connection.id)?.error ?? 'unknown error'}); its group folders were not synced.`);
+                }
+            }
             await this.groupCleanup;
-            if (!me) {
-                new Notice(`Chalkenso: could not load your account (${this.host.currentMe()?.error ?? 'unknown error'}); group folders were not synced.`);
+            if (loaded.size === 0) {
                 return;
             }
             const groups = this.settings.folders.filter((mapping) => isManagedGroup(mapping) &&
+                loaded.has(mapping.connection) &&
                 isMappingOn(this.settings, mapping) &&
                 activeVersionId(this.settings, mapping) &&
                 !this.groupState(mapping));
@@ -4646,17 +4701,16 @@ const Curriculum = (() => {
             if (!file || this.showsStatusFor(file)) {
                 return null;
             }
-            const root = normalizeFolderPath(this.settings.curriculumsFolder ?? '');
-            const groups = groupsRoot(this.settings);
             const mapping = findCoveringMapping(this.settings, file.path);
-            const underRoot = Boolean(root) && file.path.startsWith(`${root}/`);
-            const underGroups = file.path.startsWith(`${groups}/`);
-            if (!mapping && !underRoot && !underGroups) {
+            // Under any organisation's Curriculums or Groups folder.
+            const container = activeConnections()
+                .flatMap((connection) => [curriculumsRootOf(connection), groupsRootOf(connection)])
+                .find((candidate) => candidate && file.path.startsWith(`${candidate}/`)) ?? null;
+            if (!mapping && !container) {
                 return null;
             }
             let folder = null;
             if (!mapping) {
-                const container = underRoot ? root : groups;
                 const segments = file.path.slice(container.length + 1).split('/');
                 folder = segments.length > 1 && !segments[0].startsWith('_') ? `${container}/${segments[0]}` : null;
             }
@@ -4865,16 +4919,17 @@ const Curriculum = (() => {
         }
         buildFolderMenu(menu, folder) {
             const path = folder.path === '/' ? '' : folder.path;
-            // The Groups folder itself: act on all group curricula (it is never mapped by hand).
-            if (normalizeFolderPath(path) === groupsRoot(this.settings)) {
+            // An organisation's Groups folder: act on its group curricula (it is never mapped by hand).
+            const groupsOf = activeConnections().find((connection) => groupsRootOf(connection) && groupsRootOf(connection) === normalizeFolderPath(path));
+            if (groupsOf) {
                 menu.addItem((item) => item
-                    .setTitle('Chalkenso: download all group curricula')
+                    .setTitle(`Chalkenso: download all group curricula of ${organizationLabel(groupsOf)}`)
                     .setIcon('download')
-                    .onClick(() => void this.runForGroupMappings('download')));
+                    .onClick(() => void this.runForGroupMappings('download', groupsOf.id)));
                 menu.addItem((item) => item
-                    .setTitle('Chalkenso: sync all group curricula (upload, then download)')
+                    .setTitle(`Chalkenso: sync all group curricula of ${organizationLabel(groupsOf)} (upload, then download)`)
                     .setIcon('refresh-cw')
-                    .onClick(() => void this.runForGroupMappings('sync')));
+                    .onClick(() => void this.runForGroupMappings('sync', groupsOf.id)));
                 return;
             }
             const mapping = this.getFolderMappingByExactPath(path);
@@ -4956,7 +5011,7 @@ const Curriculum = (() => {
         }
     }
 
-    return { Controller: CurriculumController, workspaceFolderPath, STATUS_LABEL, FOLDER_STATUS_ORDER, normalizeFolderPath, ensureFolderPath, isManagedGroup, isInActiveEnv, activeVersionId };
+    return { Controller: CurriculumController, workspaceFolderPath, STATUS_LABEL, FOLDER_STATUS_ORDER, normalizeFolderPath, ensureFolderPath, isManagedGroup, isInActiveEnv, activeVersionId, sanitizeFolderName, curriculumsRootOf, groupsRootOf, organizationLabel };
 })();
 
 // ==============================================================================================
@@ -5008,7 +5063,7 @@ class ChalkensoSettingTab extends PluginSettingTab {
         if (general.devMode) {
             containerEl.createEl('p', {
                 cls: 'chalkenso-dev-banner',
-                text: `Developer mode is on — syncing with ${general.devBaseUrl || '(no dev server URL set)'} and the dev token. Folders you choose now are created for the dev server (with " (dev)"), and dev ids are kept apart (devLessonId, devRevision, …).`,
+                text: `Developer mode is on — syncing with ${general.devBaseUrl || '(no dev server URL set)'} and the organisations added for it. Folders you choose now are created for the dev server (with " (dev)"), and dev ids are kept apart (devLessonId, devRevision, …).`,
             });
         }
 
@@ -5022,12 +5077,12 @@ class ChalkensoSettingTab extends PluginSettingTab {
             .onChange(async (value) => {
             await this.plugin.updateGeneral({ baseUrl: value.trim() });
         }));
-        this.addTokenSetting(containerEl, 'Sync token', 'token', general.baseUrl || DEFAULT_BASE_URL);
         new Setting(containerEl)
             .setName('Developer mode')
-            .setDesc('Sync with a dev server and a dev token instead. Production ids in your notes are never touched.')
+            .setDesc('Sync with a dev server and the organisations added for it instead. Production ids in your notes are never touched.')
             .addToggle((toggle) => toggle.setValue(general.devMode).onChange(async (value) => {
             this.draft.clear();
+            this.loadedMeThisOpen = false;
             await this.plugin.updateGeneral({ devMode: value });
             this.display();
         }));
@@ -5040,15 +5095,16 @@ class ChalkensoSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                 await this.plugin.updateGeneral({ devBaseUrl: value.trim() });
             }));
-            this.addTokenSetting(containerEl, 'Dev sync token', 'devToken', general.devBaseUrl || DEFAULT_DEV_BASE_URL);
         }
-        const me = this.renderAccount(containerEl);
+
+        new Setting(containerEl).setName('Organisations').setHeading().setClass('chalkenso-section-heading');
+        const accounts = this.renderOrganisations(containerEl.createDiv({ cls: 'chalkenso-section' }));
 
         new Setting(containerEl).setName('Root folder').setHeading().setClass('chalkenso-section-heading');
         this.renderRootFolder(containerEl);
 
         new Setting(containerEl).setName('What to sync').setHeading().setClass('chalkenso-section-heading');
-        this.renderSelection(containerEl.createDiv({ cls: 'chalkenso-section' }), me);
+        this.renderSelection(containerEl.createDiv({ cls: 'chalkenso-section' }), accounts);
 
         new Setting(containerEl).setName('Lessons').setHeading().setClass('chalkenso-section-heading');
         new Setting(containerEl)
@@ -5073,66 +5129,101 @@ class ChalkensoSettingTab extends PluginSettingTab {
         this.draft.clear();
         super.hide?.();
     }
-    addTokenSetting(containerEl, name, key, baseUrl) {
-        new Setting(containerEl)
-            .setName(name)
-            .setDesc(`Create one in Chalkenso under Tokens, at the bottom of the admin sidebar (${baseUrl.replace(/\/+$/, '')}${TOKEN_PAGE_PATH}) → Create token. It starts with usr_ and acts as you: what it may sync follows your account, and the list under “What to sync” shows it.`)
-            .addText((text) => {
-            text
-                .setPlaceholder('usr_…')
-                .setValue(this.plugin.store.general[key] ?? '')
-                .onChange(async (value) => {
-                await this.plugin.updateGeneral({ [key]: value.trim() });
-            });
-            // Re-list what the new token can reach once it's pasted (not on every keystroke).
-            text.inputEl.addEventListener('change', () => {
-                this.draft.clear();
-                this.loadedMeThisOpen = false;
-                this.display();
-            });
-            text.inputEl.type = 'password';
-            text.inputEl.addClass('chalkenso-token-input');
-        });
-    }
     /**
-     * Who the token belongs to (`GET /api/sync/me`), with Refresh. Returns the loaded account, or
-     * null while it loads / when it failed (the status line says which).
+     * One row per organisation of the active server — its name, who its token signs in as, its
+     * folder, Refresh, Remove, and the token (paste a new one to replace it) — then "Add
+     * organisation". Every opening of the settings loads each account fresh (`GET /api/sync/me`).
+     * Returns the organisations whose account loaded, as `{ connection, me }`.
      */
-    renderAccount(containerEl) {
+    renderOrganisations(containerEl) {
         const plugin = this.plugin;
-        const setting = new Setting(containerEl).setName('Account');
-        const status = setting.descEl.createDiv({ cls: 'chalkenso-verify-status' });
-        setting.addButton((button) => button.setButtonText('Refresh').onClick(async () => {
-            button.setDisabled(true);
-            status.setText('Loading…');
-            await plugin.loadMe(true, { notify: true });
-            this.display();
-        }));
-        const me = plugin.currentMe();
-        if (!this.loadedMeThisOpen || !me) {
-            // Fresh on every opening of the settings (and when the server/token changed); `loadMe`
-            // remembers failures too, and re-rendering only happens when the token didn't change
+        const general = plugin.store.general;
+        const connections = plugin.activeConnections();
+        if (!this.loadedMeThisOpen) {
+            // `loadMe` remembers failures too, and re-rendering only happens when no token changed
             // meanwhile, so this can't loop or steal focus while typing.
             this.loadedMeThisOpen = true;
-            status.setText('Loading your account…');
-            const key = plugin.meKey();
-            void plugin.loadMe(true).then(() => {
-                if (plugin.meKey() === key && this.containerEl.isShown()) {
+            const keys = connections.map((connection) => plugin.meKey(connection)).join(',');
+            void plugin.loadAllMe(true).then(() => {
+                if (plugin.activeConnections().map((connection) => plugin.meKey(connection)).join(',') === keys && this.containerEl.isShown()) {
                     this.display();
                 }
             });
-            return null;
         }
-        if (me.error) {
-            status.setText(`Couldn't load your account: ${me.error} Folders you already sync still work.`);
-            status.addClass('chalkenso-verify-error');
-            return null;
+        const loaded = [];
+        for (const connection of connections) {
+            const me = plugin.currentMe(connection.id);
+            const setting = new Setting(containerEl).setName(connection.organizationName || 'Organisation');
+            setting.settingEl.addClass('chalkenso-organisation');
+            const status = setting.descEl.createDiv({ cls: 'chalkenso-verify-status' });
+            if (!me) {
+                status.setText('Loading your account…');
+            }
+            else if (me.error) {
+                status.setText(`Couldn't load your account: ${me.error} Folders you already sync still work.`);
+                status.addClass('chalkenso-verify-error');
+            }
+            else {
+                const { user } = me.data;
+                const role = user?.role === 'SUPERADMIN' ? ' · super admin' : '';
+                status.setText(`Signed in as ${user?.name ?? 'unknown'}${user?.email ? ` (${user.email})` : ''}${role} · folder ${connection.folder ?? '(once the root folder is chosen)'}`);
+                status.addClass('chalkenso-verify-ok');
+                loaded.push({ connection, me: me.data });
+            }
+            setting.addText((text) => {
+                text.setPlaceholder('usr_… (paste a new token to replace it)').setValue(connection.token ?? '');
+                text.inputEl.type = 'password';
+                text.inputEl.addClass('chalkenso-token-input');
+                text.inputEl.addEventListener('change', async () => {
+                    const token = text.getValue().trim();
+                    if (!token || token === connection.token) {
+                        text.setValue(connection.token ?? '');
+                        return;
+                    }
+                    const result = await plugin.replaceConnectionToken(connection, token);
+                    if (result.error) {
+                        new Notice(`Chalkenso: ${result.error}`);
+                    }
+                    this.draft.clear();
+                    this.display();
+                });
+            });
+            setting.addExtraButton((button) => button.setIcon('refresh-cw').setTooltip('Refresh').onClick(async () => {
+                status.setText('Loading…');
+                await plugin.loadMe(connection.id, true, { notify: true });
+                this.display();
+            }));
+            setting.addExtraButton((button) => button.setIcon('trash-2').setTooltip('Remove this organisation').onClick(async () => {
+                if (await plugin.removeConnection(connection)) {
+                    this.draft.clear();
+                    this.display();
+                }
+            }));
         }
-        const { user } = me.data;
-        const role = user?.role === 'SUPERADMIN' ? ' · super admin' : '';
-        status.setText(`Signed in as ${user?.name ?? 'unknown'}${user?.email ? ` (${user.email})` : ''}${role}`);
-        status.addClass('chalkenso-verify-ok');
-        return me.data;
+        const baseUrl = (general.devMode ? general.devBaseUrl || DEFAULT_DEV_BASE_URL : general.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+        let token = '';
+        new Setting(containerEl)
+            .setName(connections.length ? 'Add another organisation' : 'Add your organisation')
+            .setDesc(`Paste a sync token made in that organisation: in Chalkenso, switch to it, then Tokens at the bottom of the admin sidebar (${baseUrl}${TOKEN_PAGE_PATH}) → Create token. It starts with usr_, acts as you, and works in that organisation only. Its curriculums and groups get their own folder: ${plugin.rootFolder() ?? '<root folder>'}/<organisation name>.`)
+            .addText((text) => {
+            text.setPlaceholder('usr_…').onChange((value) => {
+                token = value.trim();
+            });
+            text.inputEl.type = 'password';
+            text.inputEl.addClass('chalkenso-token-input');
+        })
+            .addButton((button) => button.setButtonText('Add').setCta().onClick(async () => {
+            if (!token.startsWith('usr_')) {
+                new Notice('Chalkenso: paste a sync token; it starts with usr_.');
+                return;
+            }
+            button.setDisabled(true);
+            const result = await plugin.addConnection(token);
+            new Notice(result.error ? `Chalkenso: ${result.error}` : `Chalkenso: added ${result.connection.organizationName}. Choose what to sync from it below.`);
+            this.draft.clear();
+            this.display();
+        }));
+        return loaded;
     }
     /** The one folder everything is kept in. */
     renderRootFolder(containerEl) {
@@ -5140,7 +5231,7 @@ class ChalkensoSettingTab extends PluginSettingTab {
         const root = plugin.rootFolder();
         new Setting(containerEl)
             .setName('Folder')
-            .setDesc('Everything you choose below is kept in this folder, and only what is inside it syncs: Curriculums/<course – version> and Groups/<course – group>. Rename or move folders in Obsidian as you like; the tag next to each folder says what it is.')
+            .setDesc('Everything you choose below is kept in this folder, and only what is inside it syncs: one folder per organisation, each with Curriculums/<course – version> and Groups/<course – group>. Rename or move folders in Obsidian as you like; the tag next to each folder says what it is.')
             .addText((text) => {
             text.setPlaceholder(DEFAULT_ROOT_FOLDER).setValue(root ?? '');
             text.inputEl.addEventListener('change', async () => {
@@ -5157,29 +5248,50 @@ class ChalkensoSettingTab extends PluginSettingTab {
         }
     }
     /**
-     * Everything the token can reach, as checkboxes: each curriculum and group curriculum. Checked =
-     * kept in the vault. Changes apply on "Save" (new folders are created and downloaded; unchecked
-     * folders stop syncing and stay in the vault).
+     * Everything each organisation's token can reach, as checkboxes under the organisation's name:
+     * each curriculum and group curriculum. Checked = kept in the vault. Changes apply on "Save" (new
+     * folders are created in the organisation's folder and downloaded; unchecked folders stop syncing
+     * and stay in the vault).
      */
-    renderSelection(containerEl, me) {
+    renderSelection(containerEl, accounts) {
         const plugin = this.plugin;
         if (!plugin.rootFolder()) {
             settingsNote(containerEl, 'Choose the root folder above first.');
             return;
         }
-        if (!me) {
-            settingsNote(containerEl, 'Paste your sync token above. Once your account loads, every curriculum you can sync is listed here to choose from.');
+        if (plugin.activeConnections().length === 0) {
+            settingsNote(containerEl, 'Add your organisation above with its sync token. Once its account loads, every curriculum you can sync there is listed here to choose from.');
             return;
         }
-        const items = plugin.availableItems(me);
+        if (accounts.length === 0) {
+            settingsNote(containerEl, 'Once an organisation’s account loads, everything you can sync there is listed here.');
+            return;
+        }
+        const items = accounts.flatMap(({ connection, me }) => plugin.availableItems(connection, me));
         // Listed here = seen, so none of it is announced as new later.
         void plugin.markSeen(items);
-        const groups = [
-            { title: 'Curriculums', items: items.filter((item) => item.type === 'curriculum') },
-            { title: 'Groups', items: items.filter((item) => item.type === 'group') },
-        ];
-        if (items.length === 0) {
-            containerEl.createEl('p', { cls: 'setting-item-description', text: 'Your account has nothing to sync yet.' });
+        const named = plugin.activeConnections().length > 1;
+        for (const { connection } of accounts) {
+            const own = items.filter((item) => item.connection === connection);
+            if (named) {
+                containerEl.createDiv({ cls: 'chalkenso-organisation-heading', text: connection.organizationName || 'Organisation' });
+            }
+            if (own.length === 0) {
+                containerEl.createEl('p', { cls: 'setting-item-description', text: named ? 'Nothing to sync here yet.' : 'Your account has nothing to sync yet.' });
+                continue;
+            }
+            for (const group of [
+                { title: 'Curriculums', items: own.filter((item) => item.type === 'curriculum') },
+                { title: 'Groups', items: own.filter((item) => item.type === 'group') },
+            ]) {
+                if (group.items.length === 0) {
+                    continue;
+                }
+                containerEl.createDiv({ cls: 'chalkenso-item-group', text: group.title });
+                for (const item of group.items) {
+                    this.renderItem(containerEl, item, () => refreshActions());
+                }
+            }
         }
         const actions = new Setting(containerEl).setClass('chalkenso-selection-actions');
         const summary = actions.descEl;
@@ -5189,7 +5301,7 @@ class ChalkensoSettingTab extends PluginSettingTab {
             const changes = plugin.selectionChanges(items, this.draft);
             const parts = [];
             if (changes.add.length) {
-                parts.push(`${changes.add.length} to add (created in ${plugin.rootFolder()} and downloaded)`);
+                parts.push(`${changes.add.length} to add (created in the organisation’s folder and downloaded)`);
             }
             if (changes.remove.length) {
                 parts.push(`${changes.remove.length} to stop syncing (folders stay in your vault)`);
@@ -5198,16 +5310,6 @@ class ChalkensoSettingTab extends PluginSettingTab {
             saveButton?.setDisabled(parts.length === 0);
             revertButton?.setDisabled(parts.length === 0);
         };
-        for (const group of groups) {
-            if (group.items.length === 0) {
-                continue;
-            }
-            containerEl.createDiv({ cls: 'chalkenso-item-group', text: group.title });
-            for (const item of group.items) {
-                this.renderItem(containerEl, item, refreshActions);
-            }
-        }
-        containerEl.appendChild(actions.settingEl);
         actions
             .addButton((button) => {
             revertButton = button;
@@ -5277,13 +5379,16 @@ class ChalkensoSettingTab extends PluginSettingTab {
 class ChalkensoPlugin extends Plugin {
     async onload() {
         activeHost = this;
+        /** `/me` per organisation (connection id → `{ key, data, error }`), and loads in flight. */
+        this.meCache = new Map();
+        this.mePending = new Map();
         await this.loadStore();
 
         this.curriculum = new Curriculum.Controller(this, 'curriculum');
         await this.curriculum.onload();
         this.bindSharedSettings(this.curriculum);
-        // The Curriculums and Groups folders live in the root folder (a new vault starts with the default one).
-        if (this.placeContainers(this.rootFolder())) {
+        // Each organisation's folder (with its Curriculums and Groups folders) lives in the root folder.
+        if (this.placeConnections(this.rootFolder())) {
             await this.curriculum.saveSettings();
         }
 
@@ -5311,8 +5416,8 @@ class ChalkensoPlugin extends Plugin {
                 void this.followFolderMove(oldPath, file.path);
             }
         }));
-        // Who am I / what can I reach: tells about new things to sync. Offline is fine: chosen folders still sync.
-        this.app.workspace.onLayoutReady(() => void this.loadMe(false, { notify: true }));
+        // Who am I / what can I reach, per organisation: tells about new things to sync. Offline is fine: chosen folders still sync.
+        this.app.workspace.onLayoutReady(() => void this.loadAllMe(false, { notify: true }));
     }
 
     /** Shows the "Chalkenso" item only when the curriculum module has no status item for the active note. */
@@ -5380,8 +5485,12 @@ class ChalkensoPlugin extends Plugin {
 
     async loadStore() {
         const data = (await this.loadData()) ?? {};
+        // Only the settings this version has (anything else stored earlier is dropped on the next save).
+        const general = Object.fromEntries(Object.entries(GENERAL_DEFAULTS).map(([key, value]) => [key, data.general && key in data.general ? data.general[key] : value]));
+        general.connections = (Array.isArray(general.connections) ? general.connections : [])
+            .filter((connection) => connection && typeof connection === 'object' && connection.id && (connection.env === 'prod' || connection.env === 'dev'));
         this.store = {
-            general: { ...GENERAL_DEFAULTS, ...(data.general ?? {}) },
+            general,
             curriculum: data.curriculum ?? {},
             problems: Array.isArray(data.problems) ? data.problems : [],
             /** Items (`ws:<versionId>`) already announced per server, so each is announced once. */
@@ -5389,6 +5498,161 @@ class ChalkensoPlugin extends Plugin {
         };
     }
 
+    // ------------------------------------------------------------------------------------------
+    // Organisations: one connection per organisation and server (a sync token works in one)
+    // ------------------------------------------------------------------------------------------
+
+    activeEnv() {
+        return this.store.general.devMode ? 'dev' : 'prod';
+    }
+    /** The organisations of the active server, in the order they were added. */
+    activeConnections() {
+        const env = this.activeEnv();
+        return this.store.general.connections.filter((connection) => connection.env === env);
+    }
+    connectionById(id) {
+        return id ? this.store.general.connections.find((connection) => connection.id === id) ?? null : null;
+    }
+    /** The organisation (active server) whose folder holds `path` (the innermost), or null. */
+    connectionForPath(path) {
+        const target = Curriculum.normalizeFolderPath(path ?? '');
+        let best = null;
+        for (const connection of this.activeConnections()) {
+            const folder = Curriculum.normalizeFolderPath(connection.folder ?? '');
+            if (folder && (target === folder || target.startsWith(`${folder}/`)) && (!best || folder.length > Curriculum.normalizeFolderPath(best.folder).length)) {
+                best = connection;
+            }
+        }
+        return best;
+    }
+    blankConnection(env, token) {
+        return {
+            id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+            env,
+            token,
+            folder: null,
+            curriculumsFolder: null,
+            groupsFolder: null,
+            organizationId: null,
+            organizationName: null,
+            userId: null,
+        };
+    }
+    /**
+     * Gives an organisation its folder in the root folder (`<root>/<Organisation>`, once its name is
+     * known) with its Curriculums and Groups folders inside. A folder already inside the root folder
+     * is kept (renamed folders are followed). True when anything changed; the caller saves.
+     */
+    placeConnection(connection, root = this.rootFolder()) {
+        if (!root) {
+            return false;
+        }
+        let changed = false;
+        const insideRoot = (path) => path === root || String(path ?? '').startsWith(`${root}/`);
+        if (!connection.folder || !insideRoot(connection.folder)) {
+            if (!connection.organizationName) {
+                return false; // named once its account loads
+            }
+            connection.folder = this.freeOrganizationFolder(`${root}/${Curriculum.sanitizeFolderName(connection.organizationName, 'Organisation')}`, connection);
+            changed = true;
+        }
+        const inside = (path) => String(path ?? '').startsWith(`${connection.folder}/`);
+        if (!inside(connection.curriculumsFolder)) {
+            connection.curriculumsFolder = `${connection.folder}/Curriculums`;
+            changed = true;
+        }
+        if (!inside(connection.groupsFolder)) {
+            connection.groupsFolder = `${connection.folder}/Groups`;
+            changed = true;
+        }
+        return changed;
+    }
+    placeConnections(root) {
+        let changed = false;
+        for (const connection of this.store.general.connections) {
+            changed = this.placeConnection(connection, root) || changed;
+        }
+        return changed;
+    }
+    /** `path`, or `path (2)`, … when another organisation of the same server already uses it. */
+    freeOrganizationFolder(base, connection) {
+        const taken = (path) => this.store.general.connections.some((other) => other !== connection && other.env === connection.env && other.folder === path);
+        let path = base;
+        for (let n = 2; taken(path) && n < 100; n++) {
+            path = `${base} (${n})`;
+        }
+        return path;
+    }
+    /**
+     * Adds an organisation from a sync token: its account (`/me`) says which organisation the token
+     * works in; one already connected is refused; it gets its folder `<root>/<Organisation>`.
+     * Returns `{ connection }` or `{ error }`.
+     */
+    async addConnection(token) {
+        const env = this.activeEnv();
+        if (this.store.general.connections.some((connection) => connection.env === env && connection.token === token)) {
+            return { error: 'that token is already added.' };
+        }
+        const connection = this.blankConnection(env, token);
+        this.store.general.connections.push(connection);
+        const me = await this.loadMe(connection.id, true);
+        if (!me) {
+            const error = this.currentMe(connection.id)?.error ?? 'could not load the account for that token.';
+            this.store.general.connections = this.store.general.connections.filter((candidate) => candidate !== connection);
+            this.meCache.delete(connection.id);
+            await this.saveData(this.store);
+            return { error };
+        }
+        await this.curriculum.saveSettings();
+        return { connection };
+    }
+    /**
+     * Replaces an organisation's token. The new one must work in the same organisation: a token of
+     * another organisation is refused (add it as another organisation), so folders are never
+     * compared with the wrong organisation's list. Returns `{}` or `{ error }`.
+     */
+    async replaceConnectionToken(connection, token) {
+        let result;
+        try {
+            result = await this.fetchMe(connection.env, token);
+        }
+        catch (error) {
+            return { error: error.message };
+        }
+        if (result.error) {
+            return { error: result.error };
+        }
+        const organization = result.data.organization ?? null;
+        if (organization && connection.organizationId && organization.id !== connection.organizationId) {
+            return { error: `that token works in ${organization.name}, not ${connection.organizationName}. Add it as another organisation instead.` };
+        }
+        connection.token = token;
+        this.meCache.delete(connection.id);
+        await this.saveData(this.store);
+        await this.loadMe(connection.id, true);
+        return {};
+    }
+    /**
+     * Removes an organisation (after confirming): its folders stop syncing and stay in the vault with
+     * their notes; nothing is deleted in Chalkenso. Adding it again and ticking them reuses the folders.
+     */
+    async removeConnection(connection) {
+        const mappings = this.curriculum.settings.folders.filter((mapping) => mapping.connection === connection.id);
+        const confirmed = await confirmList(this.app, {
+            title: `Remove ${connection.organizationName || 'this organisation'}?`,
+            message: 'Its folders stop syncing. They and their notes stay in your vault, and nothing is deleted in Chalkenso. Add it again later and tick them: the same folders are used.',
+            items: mappings.map((mapping) => mapping.path || '/'),
+            confirmLabel: 'Remove',
+        });
+        if (!confirmed) {
+            return false;
+        }
+        this.store.general.connections = this.store.general.connections.filter((candidate) => candidate !== connection);
+        this.curriculum.settings.folders = this.curriculum.settings.folders.filter((mapping) => mapping.connection !== connection.id);
+        this.meCache.delete(connection.id);
+        await this.curriculum.saveSettings();
+        return true;
+    }
     // ------------------------------------------------------------------------------------------
     // Root folder + what to sync
     // ------------------------------------------------------------------------------------------
@@ -5399,42 +5663,21 @@ class ChalkensoPlugin extends Plugin {
         return root || null;
     }
     /**
-     * Moves the Curriculums / Groups containers into `root` when they aren't inside it yet (a renamed
-     * container inside it is kept). Returns true when a setting changed; the caller saves.
-     */
-    placeContainers(root) {
-        if (!root) {
-            return false;
-        }
-        const settings = this.curriculum.settings;
-        const inside = (candidate) => String(candidate ?? '').startsWith(`${root}/`);
-        let changed = false;
-        if (!inside(settings.curriculumsFolder)) {
-            settings.curriculumsFolder = `${root}/Curriculums`;
-            changed = true;
-        }
-        if (!inside(settings.groupsFolder)) {
-            settings.groupsFolder = `${root}/Groups`;
-            changed = true;
-        }
-        return changed;
-    }
-    /**
-     * Chooses the root folder (null = none, nothing syncs). The Curriculums / Groups containers move
-     * into it; synced folders outside it stop syncing (their notes stay in the vault).
+     * Chooses the root folder (null = none, nothing syncs). Each organisation's folder moves into it;
+     * synced folders outside it stop syncing (their notes stay in the vault).
      */
     async setRootFolder(path) {
         this.store.general.rootFolder = path || null;
-        this.placeContainers(path || null);
-        await this.saveData(this.store);
+        this.placeConnections(path || null);
         await this.curriculum.saveSettings();
     }
     /**
-     * Everything the account can sync, for the checkboxes: `{ key, type: 'curriculum' | 'group',
-     * label, detail, selected, path, lastSynced, readOnly, workspace, mapping }`. Folders synced for
-     * a version the server no longer lists are included (checked), so they can be unchecked.
+     * Everything an organisation's account can sync, for the checkboxes: `{ key, type: 'curriculum' |
+     * 'group', connection, label, detail, selected, path, lastSynced, readOnly, workspace, mapping }`.
+     * Its folders for a version the server no longer lists are included (checked), so they can be
+     * unchecked.
      */
-    availableItems(me) {
+    availableItems(connection, me) {
         const items = [];
         const listed = new Set();
         for (const workspace of Array.isArray(me?.workspaces) ? me.workspaces : []) {
@@ -5445,6 +5688,7 @@ class ChalkensoPlugin extends Plugin {
             items.push({
                 key: `ws:${workspace.id}`,
                 type: group ? 'group' : 'curriculum',
+                connection,
                 workspace,
                 label: group
                     ? `${workspace.course?.title ?? 'Course'} – ${workspace.group?.name ?? workspace.label}`
@@ -5461,11 +5705,11 @@ class ChalkensoPlugin extends Plugin {
                 lastSynced: mapping?.lastSynced ?? null,
             });
         }
-        // Curriculum folders of versions the server no longer lists for you: shown so they can be unchecked.
-        // (Group folders are cleaned up instead.)
+        // Its curriculum folders of versions the server no longer lists for you: shown so they can be
+        // unchecked. (Group folders are cleaned up instead.)
         const settings = this.curriculum.settings;
         for (const mapping of settings.folders) {
-            if (Curriculum.isManagedGroup(mapping) || !Curriculum.isInActiveEnv(settings, mapping)) {
+            if (mapping.connection !== connection.id || Curriculum.isManagedGroup(mapping) || !Curriculum.isInActiveEnv(settings, mapping)) {
                 continue;
             }
             if (listed.has(Curriculum.activeVersionId(settings, mapping))) {
@@ -5474,6 +5718,7 @@ class ChalkensoPlugin extends Plugin {
             items.push({
                 key: `folder:${mapping.path}`,
                 type: 'curriculum',
+                connection,
                 label: `${mapping.courseTitle ?? mapping.path}${mapping.versionLabel ? ` – ${mapping.versionLabel}` : ''}`,
                 detail: 'not available to your account any more',
                 readOnly: false,
@@ -5497,14 +5742,14 @@ class ChalkensoPlugin extends Plugin {
         }
         return { add, remove };
     }
-    /** Where a newly checked item's folder will be created. */
+    /** Where a newly checked item's folder will be created (in its organisation's folder). */
     plannedPath(item) {
-        return this.curriculum.freeGroupFolderPath(Curriculum.workspaceFolderPath(this.curriculum.settings, item.workspace));
+        return this.curriculum.freeGroupFolderPath(Curriculum.workspaceFolderPath(this.curriculum.settings, item.workspace, item.connection));
     }
     /**
      * Applies the checkboxes: unchecked folders stop syncing (after confirming; nothing is deleted),
-     * checked ones get a folder in the root folder and are downloaded right away. Local notes are
-     * never uploaded here. Returns false when cancelled.
+     * checked ones get a folder in their organisation's folder and are downloaded right away. Local
+     * notes are never uploaded here. Returns false when cancelled.
      */
     async applySelection({ add, remove }) {
         if (add.length === 0 && remove.length === 0) {
@@ -5535,14 +5780,13 @@ class ChalkensoPlugin extends Plugin {
             return false;
         }
         await Curriculum.ensureFolderPath(this.app, root);
-        const userId = this.currentMe()?.data?.user?.id ?? null;
         const created = [];
         for (const item of add) {
-            if (!item.workspace) {
+            if (!item.workspace || !item.connection) {
                 continue;
             }
             try {
-                created.push(await this.curriculum.addWorkspaceFolder(item.workspace, userId));
+                created.push(await this.curriculum.addWorkspaceFolder(item.workspace, item.connection));
             }
             catch (error) {
                 new Notice(`Chalkenso: could not create the folder for ${item.label}: ${error.message}`);
@@ -5556,7 +5800,7 @@ class ChalkensoPlugin extends Plugin {
     }
     /** Remembers items as announced for the active server (see `noticeNewItems`). */
     async markSeen(items) {
-        const env = this.store.general.devMode ? 'dev' : 'prod';
+        const env = this.activeEnv();
         const seen = new Set(this.store.seen[env] ?? []);
         const before = seen.size;
         for (const item of items) {
@@ -5568,24 +5812,25 @@ class ChalkensoPlugin extends Plugin {
         }
     }
     /**
-     * After `/me` loaded: one notice for things that became available since last time (the first
-     * time: a pointer to settings), so a new group or course never goes unnoticed.
+     * After an organisation's `/me` loaded: one notice for things that became available there since
+     * last time (the first time: a pointer to settings), so a new group or course never goes unnoticed.
      */
-    async noticeNewItems(me) {
-        const env = this.store.general.devMode ? 'dev' : 'prod';
+    async noticeNewItems(me, connection) {
+        const env = this.activeEnv();
         const seen = new Set(this.store.seen[env] ?? []);
-        const items = this.availableItems(me).filter((item) => !item.key.startsWith('folder:'));
+        const items = this.availableItems(connection, me).filter((item) => !item.key.startsWith('folder:'));
         const fresh = items.filter((item) => !item.selected && !seen.has(item.key));
         if (fresh.length === 0) {
             return;
         }
-        const first = seen.size === 0 && !items.some((item) => item.selected);
+        const first = seen.size === 0 && !this.curriculum.settings.folders.some((mapping) => mapping.env === env);
         this.store.seen[env] = [...seen, ...fresh.map((item) => item.key)];
         await this.saveData(this.store);
         const where = 'Settings → Chalkenso → What to sync';
+        const organization = this.activeConnections().length > 1 ? ` in ${Curriculum.organizationLabel(connection)}` : '';
         new Notice(first
-            ? `Chalkenso: choose what to keep in this vault under ${where} (${fresh.length} available).`
-            : `Chalkenso: now available to you: ${fresh.map((item) => item.label).join(', ')}. Add it under ${where}.`, 15000);
+            ? `Chalkenso: choose what to keep in this vault under ${where} (${fresh.length} available${organization}).`
+            : `Chalkenso: now available to you${organization}: ${fresh.map((item) => item.label).join(', ')}. Add it under ${where}.`, 15000);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -5707,9 +5952,9 @@ class ChalkensoPlugin extends Plugin {
         return parts.join(' · ');
     }
     /**
-     * What a folder is, for its tag: Chalkenso (the root folder), Curriculums, Groups, or a curriculum /
-     * group folder moved out of its container (null = no tag). `key` picks the tag's colour in
-     * styles.css; `icon` is a Lucide icon name.
+     * What a folder is, for its tag: Chalkenso (the root folder), an organisation's folder, its
+     * Curriculums or Groups folder, or a curriculum / group folder moved out of its container (null =
+     * no tag). `key` picks the tag's colour in styles.css; `icon` is a Lucide icon name.
      */
     folderTag(folder) {
         const path = folder.path;
@@ -5717,21 +5962,27 @@ class ChalkensoPlugin extends Plugin {
         if (!root || !isInsideRootFolder(path)) {
             return null;
         }
-        const settings = this.curriculum.settings;
         if (path === root) {
             return { key: 'root', icon: 'cloud', text: 'Chalkenso', tooltip: 'Root folder: everything Chalkenso keeps in this vault' };
         }
-        if (settings.curriculumsFolder && path === Curriculum.normalizeFolderPath(settings.curriculumsFolder)) {
-            return { key: 'curriculums', icon: 'graduation-cap', text: 'Curriculums', tooltip: 'Curriculums: one folder per course version' };
-        }
-        if (settings.groupsFolder && path === Curriculum.normalizeFolderPath(settings.groupsFolder)) {
-            return { key: 'groups', icon: 'users', text: 'Groups', tooltip: 'Groups: one folder per group curriculum' };
+        for (const connection of this.activeConnections()) {
+            const name = Curriculum.organizationLabel(connection);
+            if (connection.folder && path === Curriculum.normalizeFolderPath(connection.folder)) {
+                return { key: 'organization', icon: 'building-2', text: connection.organizationName || 'Organisation', tooltip: `${name}: its curriculums and groups (synced with its own token)` };
+            }
+            if (path === Curriculum.curriculumsRootOf(connection)) {
+                return { key: 'curriculums', icon: 'graduation-cap', text: 'Curriculums', tooltip: `Curriculums of ${name}: one folder per course version` };
+            }
+            if (path === Curriculum.groupsRootOf(connection)) {
+                return { key: 'groups', icon: 'users', text: 'Groups', tooltip: `Groups of ${name}: one folder per group curriculum` };
+            }
         }
         const mapping = this.curriculum.getFolderMappingByExactPath(path);
         if (mapping) {
             // A curriculum folder moved out of its container still says what it is.
             const group = Curriculum.isManagedGroup(mapping);
-            const container = Curriculum.normalizeFolderPath((group ? settings.groupsFolder : settings.curriculumsFolder) ?? '');
+            const connection = this.connectionById(mapping.connection);
+            const container = group ? Curriculum.groupsRootOf(connection) : Curriculum.curriculumsRootOf(connection);
             if (!container || folder.parent?.path !== container) {
                 return { key: group ? 'group' : 'curriculum', icon: group ? 'users' : 'graduation-cap', text: group ? 'Group' : 'Curriculum', tooltip: `${group ? 'Group curriculum' : 'Curriculum'}: ${mapping.courseTitle ?? ''}${mapping.versionLabel ? ` – ${mapping.versionLabel}` : ''}` };
             }
@@ -5761,72 +6012,126 @@ class ChalkensoPlugin extends Plugin {
     }
 
     // ------------------------------------------------------------------------------------------
-    // Account: GET /api/sync/me (who the token belongs to, and the workspaces it can reach)
+    // Accounts: GET /api/sync/me per organisation (who its token signs in as, which organisation it
+    // works in, and the workspaces it can reach)
     // ------------------------------------------------------------------------------------------
 
-    /** Identifies the active server + token, so a cached `/me` is only used for the one it came from. */
-    meKey() {
+    /** Identifies an organisation's server + token, so a cached `/me` is only used for the one it came from. */
+    meKey(connection) {
         const general = this.store.general;
-        return general.devMode ? `dev|${general.devBaseUrl}|${general.devToken}` : `prod|${general.baseUrl}|${general.token}`;
+        return `${connection.env}|${connection.env === 'dev' ? general.devBaseUrl : general.baseUrl}|${connection.token}`;
     }
 
-    /** The cached `/me` result `{ data, error }` for the active server + token, or null when not loaded. */
-    currentMe() {
-        return this.me && this.me.key === this.meKey() ? this.me : null;
+    /** An organisation's cached `/me` result `{ data, error }` for its server + token, or null when not loaded. */
+    currentMe(connectionId) {
+        const connection = this.connectionById(connectionId);
+        const me = connection ? this.meCache.get(connection.id) : null;
+        return me && me.key === this.meKey(connection) ? me : null;
     }
 
-    /** Workspaces from `/me` for the active server + token, or null when not loaded (or it failed). */
-    currentWorkspaces() {
-        return this.currentMe()?.data?.workspaces ?? null;
+    /** An organisation's workspaces from `/me`, or null when not loaded (or it failed). */
+    currentWorkspaces(connectionId) {
+        return this.currentMe(connectionId)?.data?.workspaces ?? null;
+    }
+
+    /** One `GET /api/sync/me` with a token: `{ data }` or `{ error, status }`. Throws when offline. */
+    async fetchMe(env, token) {
+        const general = this.store.general;
+        const baseUrl = env === 'dev' ? general.devBaseUrl : general.baseUrl;
+        if (!baseUrl) {
+            return { data: null, error: 'Set the server URL first.' };
+        }
+        if (!token) {
+            return { data: null, error: 'Paste the sync token (usr_…) first.' };
+        }
+        const response = await serverRequestUrl({
+            url: `${baseUrl.replace(/\/+$/, '')}/api/sync/me`,
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.status >= 400) {
+            return { data: null, status: response.status, error: response.json?.error ?? `HTTP ${response.status}` };
+        }
+        const data = response.json;
+        if (!data || !Array.isArray(data.workspaces)) {
+            return { data: null, error: 'Unexpected response from /api/sync/me (is the server up to date?).' };
+        }
+        return { data, error: null };
     }
 
     /**
-     * Loads `/me` (cached per server + token unless `force`): `{ user: { id, name, email, role },
-     * workspaces: [{ id, label, status, kind: 'core' | 'group', course, group, baseVersion,
-     * permissions }] }` — nothing else of it is used. On success, group folders are reconciled and
-     * new workspaces announced. Failures are remembered (shown in settings); with `notify`, an
-     * authorization failure also shows a notice. Returns the data, or null.
+     * Copies who and where from `/me` onto the organisation (and gives it its folder once it has a
+     * name). Servers that don't name the organisation yet leave it "Organisation". True when changed.
      */
-    async loadMe(force = false, { notify = false } = {}) {
-        const key = this.meKey();
-        const cached = this.currentMe();
+    rememberOrganization(connection, data) {
+        const fields = {
+            organizationId: data.organization?.id ?? connection.organizationId ?? null,
+            organizationName: data.organization?.name ?? connection.organizationName ?? 'Organisation',
+            userId: data.user?.id ?? null,
+        };
+        let changed = false;
+        for (const [key, value] of Object.entries(fields)) {
+            if (connection[key] !== value) {
+                connection[key] = value;
+                changed = true;
+            }
+        }
+        return this.placeConnection(connection) || changed;
+    }
+
+    /**
+     * Loads an organisation's `/me` (cached per server + token unless `force`): `{ user: { id, name,
+     * email, role }, organization: { id, name }, workspaces: [{ id, label, status, kind: 'core' |
+     * 'group', course, group, baseVersion, permissions }] }`. A token that turns out to work in another
+     * organisation than this one's is refused (its folders are never compared with that list), and so
+     * is a second connection to the same organisation. On success that organisation's group folders
+     * are reconciled and new workspaces announced. Failures are remembered (shown in settings); with
+     * `notify`, an authorization failure also shows a notice. Returns the data, or null.
+     */
+    async loadMe(connectionId, force = false, { notify = false } = {}) {
+        const connection = this.connectionById(connectionId);
+        if (!connection) {
+            return null;
+        }
+        const key = this.meKey(connection);
+        const cached = this.currentMe(connection.id);
         if (cached && !force) {
             return cached.data;
         }
-        if (this.mePending?.key === key) {
-            return this.mePending.promise;
+        const pending = this.mePending.get(connection.id);
+        if (pending?.key === key) {
+            return pending.promise;
         }
-        const general = this.store.general;
-        const baseUrl = general.devMode ? general.devBaseUrl : general.baseUrl;
-        const token = general.devMode ? general.devToken : general.token;
-        if (!baseUrl || !token) {
-            this.me = { key, data: null, error: !baseUrl ? 'Set the server URL first.' : 'Paste your sync token (usr_…) first.' };
-            return null;
-        }
+        const remember = (data, error) => {
+            this.meCache.set(connection.id, { key, data, error });
+            return data;
+        };
         const promise = (async () => {
             try {
-                const response = await serverRequestUrl({
-                    url: `${baseUrl.replace(/\/+$/, '')}/api/sync/me`,
-                    method: 'GET',
-                    headers: { Authorization: `Bearer ${token}` },
-                });
-                if (response.status >= 400) {
-                    this.me = { key, data: null, error: response.json?.error ?? `HTTP ${response.status}` };
-                    if (notify && (response.status === 401 || response.status === 403)) {
-                        new LoggedNotice(`Chalkenso: ${this.me.error}`);
+                const result = await this.fetchMe(connection.env, connection.token);
+                if (result.error) {
+                    if (notify && (result.status === 401 || result.status === 403)) {
+                        new LoggedNotice(`Chalkenso: ${Curriculum.organizationLabel(connection)}: ${result.error}`);
                     }
-                    return null;
+                    return remember(null, result.error);
                 }
-                const data = response.json;
-                if (!data || !Array.isArray(data.workspaces)) {
-                    this.me = { key, data: null, error: 'Unexpected response from /api/sync/me (is the server up to date?).' };
-                    return null;
+                const data = result.data;
+                const organization = data.organization ?? null;
+                if (organization && connection.organizationId && organization.id !== connection.organizationId) {
+                    return remember(null, `This token works in ${organization.name}, not ${connection.organizationName ?? 'this organisation'}. Paste a token made in ${connection.organizationName ?? 'it'}, or add it as another organisation.`);
                 }
-                this.me = { key, data, error: null };
-                // Group curricula no longer listed are cleaned up in the background (it may ask first),
-                // which "Sync / Download all" waits for.
+                const twin = organization && this.store.general.connections.find((other) => other !== connection && other.env === connection.env && other.organizationId === organization.id);
+                if (twin) {
+                    return remember(null, `${organization.name} is already connected.`);
+                }
+                if (this.rememberOrganization(connection, data)) {
+                    await this.curriculum.saveSettings();
+                }
+                remember(data, null);
+                // That organisation's group curricula no longer listed are cleaned up in the background
+                // (it may ask first), which "Sync / Download all" waits for.
                 try {
-                    const groups = await this.curriculum.reconcileGroups(data);
+                    const groups = await this.curriculum.reconcileGroups(data, connection);
                     if (groups.gone.length > 0) {
                         const previous = this.curriculum.groupCleanup ?? Promise.resolve();
                         this.curriculum.groupCleanup = previous
@@ -5837,22 +6142,26 @@ class ChalkensoPlugin extends Plugin {
                 catch (error) {
                     console.error('Chalkenso: could not update group curriculum folders', error);
                 }
-                await this.noticeNewItems(data).catch((error) => console.error('Chalkenso: could not announce new items', error));
+                await this.noticeNewItems(data, connection).catch((error) => console.error('Chalkenso: could not announce new items', error));
                 return data;
             }
             catch (error) {
                 // Offline or unreachable: remembered for settings; syncing folders with a version still works.
-                this.me = { key, data: null, error: error.message };
-                return null;
+                return remember(null, error.message);
             }
             finally {
-                if (this.mePending?.key === key) {
-                    this.mePending = null;
+                if (this.mePending.get(connection.id)?.key === key) {
+                    this.mePending.delete(connection.id);
                 }
             }
         })();
-        this.mePending = { key, promise };
+        this.mePending.set(connection.id, { key, promise });
         return promise;
+    }
+
+    /** Loads every organisation of the active server (in parallel); returns their data (null for failures). */
+    async loadAllMe(force = false, options = {}) {
+        return Promise.all(this.activeConnections().filter((connection) => connection.token).map((connection) => this.loadMe(connection.id, force, options)));
     }
 
     // ------------------------------------------------------------------------------------------
@@ -5902,9 +6211,10 @@ class ChalkensoPlugin extends Plugin {
         }));
     }
 
-    /** A module's settings, with the shared values filled in. */
+    /** A module's settings, with the shared values filled in (never the tokens: those are the host's, per organisation). */
     loadModuleData(scope) {
-        return { ...this.store[scope], ...this.store.general };
+        const shared = Object.fromEntries(SHARED_KEYS.map((key) => [key, this.store.general[key]]));
+        return { ...this.store[scope], ...shared };
     }
 
     async saveModuleData(scope, data) {
@@ -5940,7 +6250,7 @@ class ChalkensoPlugin extends Plugin {
         await this.curriculum.saveSettings();
     }
 
-    /** A synced folder was renamed/moved inside Obsidian: rewrite the root folder, containers and matching mappings. */
+    /** A synced folder was renamed/moved inside Obsidian: rewrite the root folder, organisation folders, containers and matching mappings. */
     async followFolderMove(oldPath, newPath) {
         let changed = false;
         const moved = (path) => {
@@ -5958,11 +6268,13 @@ class ChalkensoPlugin extends Plugin {
             this.store.general.rootFolder = root;
             changed = true;
         }
-        for (const key of ['curriculumsFolder', 'groupsFolder']) {
-            const next = moved(this.curriculum.settings[key]);
-            if (next !== null) {
-                this.curriculum.settings[key] = next;
-                changed = true;
+        for (const connection of this.store.general.connections) {
+            for (const key of ['folder', 'curriculumsFolder', 'groupsFolder']) {
+                const next = moved(connection[key]);
+                if (next !== null) {
+                    connection[key] = next;
+                    changed = true;
+                }
             }
         }
         for (const mapping of this.curriculum.settings.folders ?? []) {

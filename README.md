@@ -10,8 +10,8 @@ Write your course curricula in Obsidian and keep them in sync with [Chalkenso](h
 - **Feedback with revision plans.** Reviewer comments arrive as one checklist note per lesson, where
   you (or an assistant) write the plan for each item. Plans and ticks go back to Chalkenso.
 
-One **sync token** (`usr_…`) covers everything. It acts as you: what it may sync follows your account
-in Chalkenso.
+A **sync token** (`usr_…`) acts as you in one organisation: what it may sync follows your account
+there. If you belong to several organisations, add each with its own token; each gets its own folder.
 
 > [!WARNING]
 > **One plugin per folder.** If you also use another sync plugin in this vault, never let both map
@@ -33,37 +33,46 @@ The plugin lives in the `obsidian-plugin/` folder of the Chalkenso repository.
 
 ## Connect
 
-1. In Chalkenso, open **Tokens** at the bottom of the admin sidebar (`/admin/api-tokens`), give the
-   token a name (for example the device it is for) and click **Create token**. Copy it: it is shown
-   only once.
-2. In Obsidian, open **Settings → Chalkenso → Connection**:
-   - **Server URL**: `https://chalkenso.com`, or the address of your own Chalkenso server.
-   - **Sync token**: paste the `usr_…` token.
-3. **Account** shows who the token belongs to. **Refresh** reloads it.
+1. In Chalkenso, switch to the organisation you want (the card at the top of the sidebar), open
+   **Tokens** at the bottom of the admin sidebar (`/admin/api-tokens`), give the token a name (for
+   example the device it is for) and click **Create token**. Copy it: it is shown only once. A token
+   works in the organisation it was made in.
+2. In Obsidian, open **Settings → Chalkenso**:
+   - **Connection → Server URL**: `https://chalkenso.com`, or the address of your own Chalkenso server.
+   - **Organisations → Add your organisation**: paste the `usr_…` token and click **Add**.
+3. Each organisation shows who its token signs in as and its folder. **Refresh** reloads it, the bin
+   removes it (its folders stop syncing and stay in your vault), and pasting a new token into its
+   field replaces the token. A token of another organisation is refused there: add it as another
+   organisation instead. Repeat step 1–2 for every organisation you belong to.
 
 ## Folders
 
 Everything the plugin keeps lives in one **root folder** (default `Chalkenso`; change it under
-**Settings → Chalkenso → Root folder**). Nothing outside it syncs.
+**Settings → Chalkenso → Root folder**), with one folder per organisation. Nothing outside it syncs.
 
 ```
-Chalkenso/                               [Chalkenso]
-├── Curriculums/                         [Curriculums]
-│   └── Web Development – v3/            one folder per course version
-│       ├── README.md                    the folder's own notes, never a lesson
-│       ├── 01 Setup.md                  lessons (subfolders are fine)
-│       ├── _feedback/                   feedback checklists (_feedback-dev/ in developer mode)
-│       ├── _conflicts/                  Chalkenso's copy of lessons changed on both sides
-│       └── _attachments/                images fetched for ![[embeds]]
-└── Groups/                              [Groups]
-    └── Web Development – Spring 2026/   one folder per group curriculum
+Chalkenso/                                   [Chalkenso]
+├── Northwind Academy/                       [Northwind Academy]  one folder per organisation
+│   ├── Curriculums/                         [Curriculums]
+│   │   └── Web Development – v3/            one folder per course version
+│   │       ├── README.md                    the folder's own notes, never a lesson
+│   │       ├── 01 Setup.md                  lessons (subfolders are fine)
+│   │       ├── _feedback/                   feedback checklists (_feedback-dev/ in developer mode)
+│   │       ├── _conflicts/                  Chalkenso's copy of lessons changed on both sides
+│   │       └── _attachments/                images fetched for ![[embeds]]
+│   └── Groups/                              [Groups]
+│       └── Web Development – Spring 2026/   one folder per group curriculum
+└── SmartNinja School/                       [SmartNinja School]
+    ├── Curriculums/
+    └── Groups/
 ```
 
-**What to sync** in the settings lists every course version and group curriculum your account can
-reach. Tick what you want in this vault and click **Save**: each ticked item gets its folder
-(`Curriculums/<course> – <version>` or `Groups/<course> – <group>`) and is downloaded right away. A
-folder with that name that already exists is used as it is. Unticking stops syncing the folder; the
-folder and its notes stay in your vault and nothing is deleted in Chalkenso.
+**What to sync** in the settings lists, under each organisation's name, every course version and
+group curriculum your account can reach there. Tick what you want in this vault and click **Save**:
+each ticked item gets its folder in its organisation's folder (`Curriculums/<course> – <version>` or
+`Groups/<course> – <group>`) and is downloaded right away, with that organisation's token. A folder
+with that name that already exists is used as it is. Unticking stops syncing the folder; the folder
+and its notes stay in your vault and nothing is deleted in Chalkenso.
 
 To sync a folder you already have under a different name, run **Map folder to a curriculum
 version** (or right-click the folder): pick the folder, then the version.
@@ -215,14 +224,16 @@ Both move the conflict copy to the trash.
 ## Group curricula
 
 A feedback-driven group gets its own copy of a course version in Chalkenso. Tick it under **What to
-sync → Groups** and it gets a folder `Groups/<course> – <group>/` with a `README.md`, downloaded right
-away. When the core version is synced too, each group note's `coreLesson` links to the core note it
+sync → Groups** (of its organisation) and it gets a folder `<Organisation>/Groups/<course> – <group>/`
+with a `README.md`, downloaded right away. Right-click an organisation's Groups folder to download or
+sync all of its group curricula. When the core version is synced too, each group note's `coreLesson` links to the core note it
 came from.
 
 When the group is closed (or you lose access), its folder is cleaned up: unedited lesson copies,
 feedback notes, the plugin's README and downloaded images go to Obsidian's trash; anything else
 (edited notes, notes without a `lessonId`, conflict copies, your own files) moves to
-`Groups/_detached/<folder>/`. Edited notes are listed for confirmation first.
+`<Organisation>/Groups/_detached/<folder>/`. Edited notes are listed for confirmation first. Only a
+group's own organisation decides: what another organisation's token lists never removes a folder.
 
 ## Read-only workspaces
 
@@ -234,7 +245,7 @@ and WRITE + TASKS to send plans and ticks; **Delete lesson on server** needs DEL
 ## Developer mode
 
 **Settings → Chalkenso → Developer mode** syncs with a dev server (default `http://localhost:3100`)
-and a dev sync token. Folders ticked in developer mode get ` (dev)` appended, each mapping remembers
+and the organisations added for it (each with a dev sync token). Folders ticked in developer mode get ` (dev)` appended, each mapping remembers
 its server, and notes use the `dev*` properties and `_feedback-dev/`, so production ids are never
 touched.
 
@@ -261,15 +272,18 @@ know those lessons, so:
    projects stay there). From now on only Chalkenso may map these folders.
 2. **In Chalkenso**, create the course with the same slug, its version(s) and its arcs if you like
    (missing arcs are created on upload), and the groups.
-3. **In this plugin**, set the root folder to the folder that holds `Curriculums/` (for example
-   `Website`), and paste your sync token.
-4. **Map each folder to its version**: tick the version under *What to sync* (a folder named
+3. **In this plugin**, add your organisation with its sync token, and set the root folder to the
+   folder that holds your organisation's folder (for example `Website`).
+4. **Move the folders into the organisation's folder** in Obsidian: curriculum folders into
+   `<root>/<Organisation>/Curriculums/`, group folders into `<root>/<Organisation>/Groups/` (the
+   plugin creates both once the organisation's account loads).
+5. **Map each folder to its version**: tick the version under *What to sync* (a folder named
    `<course> – <version>` is reused), or run **Map folder to a curriculum version** for a folder with
    another name.
-5. **Disconnect**: the first sync offers it; you can also run **Disconnect folder from its previous
+6. **Disconnect**: the first sync offers it; you can also run **Disconnect folder from its previous
    server** yourself.
-6. **Upload** the folder. Missing arcs are created first, then the lessons, in the folder's order.
-7. **Feedback-driven groups with no revisions yet:** delete the old local group folder and tick the
+7. **Upload** the folder. Missing arcs are created first, then the lessons, in the folder's order.
+8. **Feedback-driven groups with no revisions yet:** delete the old local group folder and tick the
    group under *What to sync*; the plugin downloads Chalkenso's group copy fresh.
 <!-- cloud:end -->
 
