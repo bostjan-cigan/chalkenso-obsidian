@@ -202,8 +202,9 @@ folder's `_feedback/`. Each item has a checkbox, the reviewer's comment (context
 **`#ai/ready`.** An item cleared in Chalkenso for an AI assistant arrives tagged `#ai/ready` on its
 checkbox line, and the note's `aiReady` property counts the open ones. Tagged items may be carried
 out end to end (edit the lesson, tick the item); untagged items are assist-only (write the plan, leave
-the lesson to a person). Ticking clears the flag in Chalkenso. Tell your assistant about this
-contract in its own instructions; the plugin only writes the signal. To list what is waiting:
+the lesson to a person). Ticking clears the flag in Chalkenso. The plugin only writes the signal;
+[Claude Code](#claude-code) knows the contract once its kit is installed, and any other assistant
+needs it in its own instructions. To list what is waiting:
 
 ````
 ```dataview
@@ -248,6 +249,35 @@ and WRITE + TASKS to send plans and ticks; **Delete lesson on server** needs DEL
 and the organisations added for it (each with a dev sync token). Folders ticked in developer mode get ` (dev)` appended, each mapping remembers
 its server, and notes use the `dev*` properties and `_feedback-dev/`, so production ids are never
 touched.
+
+## Claude Code
+
+`claude/` is a kit that lets [Claude Code](https://claude.com/claude-code), opened in your vault,
+work on the courses with you: check them for the usual curriculum failures, plan feedback, and carry
+out plans you approved. It never uploads; you run the plugin's commands. It needs Python 3.8 or later.
+
+```bash
+python3 obsidian-plugin/claude/install.py "<path to your vault>"
+```
+
+| What | Where it goes |
+|---|---|
+| Skills: `plan-feedback`, `apply-plan`, `curriculum-check`, `curriculum-audit`, `enrich-lessons` | `.claude/skills/` |
+| Scripts that read the vault as a knowledge graph (`graph.py`), draw course canvases (`build_canvases.py`), colour the graph view (`graph_colors.py`) and check a note's sync state (`sync_state.py`) | `.claude/scripts/` |
+| The rules Claude follows in the vault: which folders it may touch, plugin-owned properties, sync safety, feedback markers, `#ai/ready` | `AGENTS.md` |
+| Its allowed commands | added to `.claude/settings.json` |
+| Bases (lessons by course, open feedback, concepts), templates for lessons and concepts, and a README for people | `Curriculum Knowledge/`, only what is missing |
+
+Run the same command again after updating the plugin: skills, scripts and `AGENTS.md` are replaced
+(an `AGENTS.md` you changed is kept as `AGENTS.md.bak`); your concept notes, canvases, audits and
+Bases stay. `--update-bases` replaces the Bases too, for example after you change the root folder.
+
+The scripts find course folders through the plugin's settings (they read only folder paths from
+`data.json`, never tokens), so renamed and moved folders work. Concepts live in
+`Curriculum Knowledge/Concepts/`, one note each, and lessons link them in their own properties
+(`introduces`, `uses`, `requires`, `objectives`), which never sync. Start with
+*"run enrich-lessons on Web Development"* (your course's name): until lessons have those properties, the graph has little to
+check. `Curriculum Knowledge/README.md` in the vault explains the rest.
 
 ## Moving from another server
 

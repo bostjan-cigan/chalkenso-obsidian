@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 .claude/scripts/graph.py *)",
+      "Bash(python3 .claude/scripts/sync_state.py check *)",
+      "Bash(python3 .claude/scripts/graph_colors.py)",
+      "Bash(python3 .claude/scripts/build_canvases.py)",
+      "Bash(python3 .claude/scripts/build_canvases.py *)",
+      "Edit(.obsidian/graph.json)"
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+filters:
+  and:
+    - file.ext == "md"
+    - file.inFolder("Chalkenso")
+    - file.path.contains("/_feedback")
+    - or:
+        - note.lesson
+        - file.name.startsWith("Feedback - ")
+formulas:
+  course: file.path.split("/")[3]
+properties:
+  formula.course:
+    displayName: Course / group
+  note.lesson:
+    displayName: Lesson
+  note.open:
+    displayName: Open items
+  note.aiReady:
+    displayName: Ready for agent
+views:
+  - type: table
+    name: Open feedback
+    filters:
+      and:
+        - note.open > 0
+    groupBy:
+      property: formula.course
+      direction: ASC
+    order:
+      - file.name
+      - lesson
+      - open
+      - file.mtime
+    sort:
+      - property: open
+        direction: DESC
+  - type: table
+    name: Ready for agent
+    filters:
+      and:
+        - note.aiReady > 0
+    groupBy:
+      property: formula.course
+      direction: ASC
+    order:
+      - file.name
+      - lesson
+      - aiReady
+      - open
+    sort:
+      - property: aiReady
+        direction: DESC
+  - type: table
+    name: All feedback
+    order:
+      - file.name
+      - formula.course
+      - lesson
+      - open
+      - aiReady
+      - file.mtime
+    sort:
+      - property: file.mtime
+        direction: DESC

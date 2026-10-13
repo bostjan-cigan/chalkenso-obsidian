@@ -1,0 +1,42 @@
+filters:
+  and:
+    - file.ext == "md"
+    - file.inFolder("Curriculum Knowledge/Concepts")
+formulas:
+  taught_in: file.backlinks.length
+properties:
+  note.definition:
+    displayName: Definition
+  note.aliases:
+    displayName: Aliases
+  formula.taught_in:
+    displayName: Linked from
+views:
+  - type: table
+    name: All concepts
+    order:
+      - file.name
+      - definition
+      - formula.taught_in
+    sort:
+      - property: file.name
+        direction: ASC
+  - type: table
+    name: Orphans
+    filters:
+      and:
+        - formula.taught_in == 0
+    order:
+      - file.name
+      - definition
+  - type: table
+    name: Hot spots
+    filters:
+      and:
+        - formula.taught_in >= 4
+    order:
+      - file.name
+      - formula.taught_in
+    sort:
+      - property: formula.taught_in
+        direction: DESC

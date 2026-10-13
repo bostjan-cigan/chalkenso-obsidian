@@ -1,0 +1,104 @@
+filters:
+  and:
+    - file.ext == "md"
+    - file.name != "README"
+    - not:
+        - file.path.contains("/_")
+    - file.inFolder("Chalkenso")
+    - or:
+        - file.path.contains("/Curriculums/")
+        - file.path.contains("/Groups/")
+formulas:
+  organisation: file.path.split("/")[1]
+  course: file.path.split("/")[3]
+  concepts_count: if(note.introduces, note.introduces.length, 0) + if(note.uses, note.uses.length, 0) + if(note.concepts, note.concepts.length, 0)
+  objectives_count: if(note.objectives, note.objectives.length, 0)
+properties:
+  formula.organisation:
+    displayName: Organisation
+  formula.course:
+    displayName: Course / group
+  note.arc:
+    displayName: Arc
+  note.objectives:
+    displayName: Objectives
+  note.introduces:
+    displayName: Introduces
+  note.uses:
+    displayName: Uses
+  note.requires:
+    displayName: Requires
+  note.coreLesson:
+    displayName: Core lesson
+  note.syncStatus:
+    displayName: Sync
+  note.lessonStatus:
+    displayName: Status
+  formula.concepts_count:
+    displayName: "# concepts"
+  formula.objectives_count:
+    displayName: "# objectives"
+views:
+  - type: table
+    name: By course
+    groupBy:
+      property: formula.course
+      direction: ASC
+    order:
+      - file.name
+      - arc
+      - objectives
+      - introduces
+      - uses
+      - requires
+      - lessonStatus
+      - syncStatus
+    sort:
+      - property: file.name
+        direction: ASC
+  - type: table
+    name: Needs metadata
+    filters:
+      or:
+        - formula.objectives_count == 0
+        - formula.concepts_count == 0
+    groupBy:
+      property: formula.course
+      direction: ASC
+    order:
+      - file.name
+      - formula.objectives_count
+      - formula.concepts_count
+    sort:
+      - property: file.name
+        direction: ASC
+  - type: table
+    name: Sync attention
+    filters:
+      or:
+        - and:
+            - note.syncStatus
+            - note.syncStatus != "synced"
+        - and:
+            - note.devSyncStatus
+            - note.devSyncStatus != "synced"
+    order:
+      - file.name
+      - formula.course
+      - syncStatus
+      - devSyncStatus
+      - lastSynced
+  - type: table
+    name: Group copies
+    filters:
+      and:
+        - file.path.contains("/Groups/")
+    groupBy:
+      property: formula.course
+      direction: ASC
+    order:
+      - file.name
+      - coreLesson
+      - devCoreLesson
+      - syncStatus
+      - devSyncStatus
