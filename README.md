@@ -38,7 +38,8 @@ The plugin lives in the `obsidian-plugin/` folder of the Chalkenso repository.
    example the device it is for) and click **Create token**. Copy it: it is shown only once. A token
    works in the organisation it was made in.
 2. In Obsidian, open **Settings → Chalkenso**:
-   - **Connection → Server URL**: `https://chalkenso.com`, or the address of your own Chalkenso server.
+   - **Connection → Server URL**: `https://chalkenso.com`, or the address of your own Chalkenso server
+     (a local installation: `http://localhost:3000`, or its `NEXT_PUBLIC_APP_URL`).
    - **Organisations → Add your organisation**: paste the `usr_…` token and click **Add**.
 3. Each organisation shows who its token signs in as and its folder. **Refresh** reloads it, the bin
    removes it (its folders stop syncing and stay in your vault), and pasting a new token into its
