@@ -77,14 +77,23 @@ a learner must know first (CSRF requires Session cookies). Only real prerequisit
 
 ## Feedback and plans
 
-Reviewer comments reach the vault as feedback notes: `_feedback/Feedback - <lesson>.md` (or
-`_feedback-dev/`). Each item has a hidden `%%task:<id>%%` marker and a `#### Plan %%plan:<id>:<hash>%%`
-heading. The plan under that heading is sent to the task in Chalkenso and is **the source of
-truth** for what changes, in the group copy and in core.
+All of a lesson's feedback reaches the vault as one feedback note: `_feedback/Feedback - <lesson>.md`
+(or `_feedback-dev/`), in three sections:
 
-- Write only the text under `#### Plan` headings, and the item checkboxes (`[x]` done, `[-]` skip).
-- Never change or remove `%%task:…%%` or `%%plan:…%%` markers, the quotes, or anything else in the
-  note. The plugin rewrites the rest on every pull.
+- **Open**: feedback nobody has used yet, each with a hidden `%%feedback:<id>%%` marker and a
+  `Reply:` line. Ticked `[x]`, it's answered with that reply and done in Chalkenso.
+- **Improvement**: the lesson's open improvement (and a revision brief), each with a hidden
+  `%%task:<id>%%` marker and a `#### Plan %%plan:<id>:<hash>%%` heading. The plan under that heading
+  is sent to Chalkenso and is **the source of truth** for what changes, in the group copy and in
+  core. A plan sent also uses the open feedback that isn't ticked: it joins the improvement. With no
+  improvement yet, the heading is `%%plan:new:…%%`, and a plan there starts one. One marked *worked
+  on in Chalkenso* has no checkbox or plan heading: leave it, it's finished in the app.
+- **Done**: what's finished, folded. Read it for history; never edit it.
+
+- Write only the text under `#### Plan` headings, after `Reply:`, and the checkboxes (`[x]` done,
+  `[-]` skip, for improvements).
+- Never change or remove `%%feedback:…%%`, `%%task:…%%` or `%%plan:…%%` markers, the quotes, or
+  anything else in the note. The plugin rewrites the rest on every pull.
 - Each plan ends with one scope line: `Scope: group only` or `Scope: group and core` (`Scope: core`
   for a core lesson).
 

@@ -85,8 +85,8 @@ Open Claude Code in the vault folder. It follows `AGENTS.md` and has these skill
 
 Claude never uploads. You run the plugin's upload and pull commands.
 
-**Handing an item over.** In Chalkenso, tick *Ready for the AI agent* on a feedback item (or a
-lesson's brief) and start it. The item arrives here tagged `#ai/ready`, and Claude may then carry
+**Handing an item over.** In Chalkenso, tick *Ready for the AI agent* on a lesson's improvement (or
+its brief). It arrives here tagged `#ai/ready` on the next feedback pull, and Claude may then carry
 out its plan end to end — edit the lesson and tick the item — without asking each time. Items
 without the tag stay assist-only: Claude plans and proposes, you edit. *Ready for agent* above lists
 what is waiting.

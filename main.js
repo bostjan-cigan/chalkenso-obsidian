@@ -740,15 +740,27 @@ const Curriculum = (() => {
         }
         return stored.arrayBuffer;
     }
-    /** In-progress feedback (items and lesson briefs) for the version. */
-    async function fetchTasks(target) {
+    /**
+     * The version's tasks (improvements and lesson briefs, done included) and its feedback (open, and
+     * the recent done ones). Older servers send only open tasks and no feedback.
+     */
+    async function fetchFeedback(target) {
         const response = await curriculumRequest(target, 'GET', '/api/sync/tasks');
-        return response.json.tasks;
+        return { tasks: response.json.tasks ?? [], feedback: response.json.feedback ?? [] };
+    }
+    /** A piece of feedback answered in the vault: its reply (may be empty), and it's done. */
+    async function answerFeedback(target, commentId, reply) {
+        await curriculumRequest(target, 'PATCH', `/api/sync/feedback/${encodeURIComponent(commentId)}`, { status: 'RESOLVED', reply });
+    }
+    /** A plan for a lesson's open feedback: it starts (or joins) the lesson's improvement. */
+    async function createImprovement(target, input) {
+        const response = await curriculumRequest(target, 'POST', '/api/sync/improvements', input);
+        return response.json.task;
     }
     /**
-     * Updates a task from the vault: `{ status?, plan?, aiReady? }` — its revision plan, its lane
-     * (e.g. DONE or IGNORED) and/or its agent handoff flag. The server saves the plan before the
-     * status, so all of it can go in one request.
+     * Updates a task from the vault: `{ status?, plan?, aiReady?, useFeedback? }` — its revision
+     * plan (with the open feedback it uses), its lane (e.g. DONE or IGNORED) and/or its agent handoff
+     * flag. The server saves the plan before the status, so all of it can go in one request.
      */
     async function updateTask(target, taskId, update) {
         await curriculumRequest(target, 'PATCH', `/api/sync/tasks/${encodeURIComponent(taskId)}`, update);
@@ -1937,12 +1949,23 @@ const Curriculum = (() => {
 
     // ---- curriculum/feedback
     /*
-     * One checklist note per lesson with in-progress feedback from the dashboard. Each item is a
-     * checkbox, the reviewer's comment (context only) and a **Plan** section. The instructor writes the
-     * plan — what to change and how — and that plan is what a revision, by a person or an assistant,
-     * executes. The note is the plan's source of truth: plans are sent to the task in the dashboard on
-     * every feedback pull and lesson upload. Tick `[x]` when an item is done, `[-]` to skip it; ticks
-     * are sent when the lesson is uploaded. Everything outside the checkboxes and plans is regenerated.
+     * One note per lesson with all of its feedback from Chalkenso, done included, so the whole loop
+     * works from the vault: answer feedback, plan it, fix the lesson, close it. Three sections:
+     *
+     * - **Open**: feedback nobody has used yet (learner feedback and instructor notes), each a
+     *   checkbox with a `Reply:` line. Ticked `[x]`, it's answered: the reply (if any) is saved and
+     *   the feedback is done, as Reply does in the app. Sent on every feedback pull.
+     * - **Improvement**: the lesson's open improvement (and a revision brief), each a checkbox with
+     *   the feedback it uses and a **Plan** section. The plan is what the revision, by a person or an
+     *   assistant, executes; the note is its source of truth, sent on every pull and lesson upload,
+     *   with the open feedback that isn't ticked, which joins the improvement. With no improvement
+     *   yet, a plan written under its `new` heading starts one with that feedback. Tick `[x]` when it's
+     *   done, `[-]` to skip it; ticks are sent when the lesson is uploaded. One worked on in the app is
+     *   shown read-only: it's finished there.
+     * - **Done**: what's finished, wherever it was finished, folded. Read-only.
+     *
+     * Everything outside the checkboxes, replies and plans is regenerated. Whichever side finishes
+     * first wins: something done in the app moves to Done on the next pull.
      *
      * Plan headings carry a hidden `%%plan:<taskId>:<hash>%%` marker; the hash is of the plan as last
      * agreed with the dashboard, so a pull can tell a local edit (send it) from a plan updated
@@ -1963,6 +1986,14 @@ const Curriculum = (() => {
     const PLAN_HEADING = /^#{1,6}\s+Plan\b.*%%plan:([A-Za-z0-9_-]+)(?::([0-9a-f]*))?%%\s*$/;
     /** A plan runs until the next item, plan or top-level (`#`/`##`) heading. */
     const PLAN_END = /^#{1,2}\s/;
+    /** Marks an open piece of feedback's checkbox line with its id (hidden in reading view). */
+    const FEEDBACK_MARKER = /%%feedback:([A-Za-z0-9_-]+)%%/;
+    const FEEDBACK_LINE = /^\s*[-*]\s+\[(.)\]\s.*%%feedback:([A-Za-z0-9_-]+)%%/;
+    /** Under an open piece of feedback: the answer to send with its tick. */
+    const REPLY_LINE = /^\s*(?:\*\*)?Reply:(?:\*\*)?[ \t]?(.*)$/;
+    /** The plan heading's id while the lesson has no improvement: a plan there starts one. */
+    const NEW_PLAN = 'new';
+    const OPEN_TASK_STATUSES = ['TODO', 'IN_PROGRESS'];
     /** Plan text as compared and sent: line endings and trailing whitespace don't count as edits. */
     function normalizePlan(text) {
         return (text ?? '')
@@ -1993,10 +2024,6 @@ const Curriculum = (() => {
             pending: plans.filter(isPlanEdited).length,
         };
     }
-    /** Re-stamps the markers of plans the dashboard now has (`taskId → sent text`), leaving the rest of the note alone. */
-    function markPlansSynced(content, sent) {
-        return content.replace(/%%plan:([A-Za-z0-9_-]+)(?::[0-9a-f]*)?%%/g, (marker, taskId) => sent.has(taskId) ? `%%plan:${taskId}:${hashPlan(sent.get(taskId))}%%` : marker);
-    }
     /** Plans in a feedback note, keyed by task id: `{ text, base }` (base = hash last agreed). */
     function parsePlans(content) {
         const plans = new Map();
@@ -2014,7 +2041,7 @@ const Curriculum = (() => {
                 current = { id: heading[1], base: heading[2] || null, lines: [] };
                 continue;
             }
-            if (CHECKLIST_LINE.test(line) || PLAN_END.test(line)) {
+            if (CHECKLIST_LINE.test(line) || FEEDBACK_LINE.test(line) || PLAN_END.test(line)) {
                 close();
                 continue;
             }
@@ -2022,6 +2049,40 @@ const Curriculum = (() => {
         }
         close();
         return plans;
+    }
+    /**
+     * Open feedback in a note, keyed by id: `{ ticked, reply }`. The reply is what follows `Reply:`
+     * up to the next item, callout, list line or heading.
+     */
+    function parseAnswers(content) {
+        const answers = new Map();
+        let current = null;
+        for (const line of content.split(/\r?\n/)) {
+            const item = FEEDBACK_LINE.exec(line);
+            if (item) {
+                current = { ticked: item[1].toLowerCase() === 'x', lines: [], inReply: false };
+                answers.set(item[2], current);
+                continue;
+            }
+            if (!current || CHECKLIST_LINE.test(line) || PLAN_HEADING.test(line) || PLAN_END.test(line)) {
+                current = null;
+                continue;
+            }
+            const reply = REPLY_LINE.exec(line);
+            if (reply) {
+                current.inReply = true;
+                current.lines.push(reply[1]);
+            }
+            else if (current.inReply) {
+                if (/^\s*([-*>]|#)/.test(line)) {
+                    current.inReply = false;
+                }
+                else {
+                    current.lines.push(line);
+                }
+            }
+        }
+        return new Map([...answers].map(([id, answer]) => [id, { ticked: answer.ticked, reply: normalizePlan(answer.lines.join('\n')) }]));
     }
     /** Ticked items in a feedback note: `[x]` → DONE, `[-]` → IGNORED; `[ ]` is still open. */
     function parseTicks(content) {
@@ -2041,11 +2102,11 @@ const Curriculum = (() => {
         }
         return ticks;
     }
-    /** Ticks every still-open checklist item (the "Mark lesson feedback done" command). */
+    /** Ticks every still-open item, feedback included (the "Mark lesson feedback done" command). */
     function tickAll(content) {
         return content
             .split('\n')
-            .map((line) => TASK_MARKER.test(line) ? line.replace(/^(\s*[-*]\s+)\[ \]/, '$1[x]') : line)
+            .map((line) => TASK_MARKER.test(line) || FEEDBACK_MARKER.test(line) ? line.replace(/^(\s*[-*]\s+)\[ \]/, '$1[x]') : line)
             .join('\n');
     }
     function readFrontmatter(app, file) {
@@ -2126,9 +2187,51 @@ const Curriculum = (() => {
             blocks.push(`**In context:**\n${quote(excerpt)}`);
         }
         if (comment.adminResponse?.trim()) {
-            blocks.push(`**Reply to reviewer:** ${comment.adminResponse.trim()}`);
+            blocks.push(`**Your reply:** ${comment.adminResponse.trim()}`);
         }
         return blocks;
+    }
+    /** Who a piece of feedback is from: an instructor's name with "note", or the learner's label. */
+    function feedbackFrom(comment) {
+        return comment.isInstructorNote ? `${comment.proposerName} · note` : comment.proposerName;
+    }
+    /** A date as the notes show it (YYYY-MM-DD), or ''. */
+    function noteDate(iso) {
+        return typeof iso === 'string' ? iso.slice(0, 10) : '';
+    }
+    /** An open piece of feedback: its checkbox, what was said, and the reply line kept from the note. */
+    function renderOpenFeedback(comment, answer) {
+        const parts = [`- ${answer?.ticked ? '[x]' : '[ ]'} **${feedbackFrom(comment)}** %%feedback:${comment.id}%%`];
+        parts.push(callout(`[!quote] ${comment.isInstructorNote ? 'Note' : 'Feedback'} · ${noteDate(comment.createdAt)}`, commentBlocks(comment, null)));
+        parts.push(answer?.reply ? `Reply: ${answer.reply}` : 'Reply:');
+        return parts.join('\n\n');
+    }
+    /** Feedback blocks of a task: each piece it uses, named when there are several. */
+    function taskCommentBlocks(task) {
+        const comments = task.sourceComments ?? (task.sourceComment ? [task.sourceComment] : []);
+        return comments.flatMap((comment) => commentBlocks(comment, comments.length > 1 ? comment.proposerName : null));
+    }
+    /** An open task worked on in the app: read-only here (no checkbox, no plan heading). */
+    function renderAppTask(task) {
+        const blocks = [...taskCommentBlocks(task)];
+        if (task.plan?.trim()) {
+            blocks.push(`**Plan:**\n${task.plan.trim()}`);
+        }
+        return `- **${task.isBrief ? 'Revision brief' : task.title}** · worked on in Chalkenso\n\n${callout('[!note] Being worked on in the app: finish it there. It moves to Done here once it is finished.', blocks)}`;
+    }
+    /** A finished task, folded: the feedback it used and its plan. */
+    function renderDoneTask(task) {
+        const blocks = [...taskCommentBlocks(task)];
+        if (task.plan?.trim()) {
+            blocks.push(`**Plan:**\n${task.plan.trim()}`);
+        }
+        return callout(`[!done]- ${task.isBrief ? 'Revision brief' : task.title} · done ${noteDate(task.completedAt ?? task.updatedAt)}`, blocks);
+    }
+    /** Feedback answered on its own (not in an improvement), folded. */
+    function renderDoneFeedback(comment) {
+        const words = comment.selectedText.trim().split(/\s+/);
+        const excerpt = words.slice(0, 8).join(' ') + (words.length > 8 ? '…' : '');
+        return callout(`[!done]- ${feedbackFrom(comment)}: “${excerpt}” · done ${noteDate(comment.resolvedAt ?? comment.createdAt)}`, commentBlocks(comment, null));
     }
     function renderItem(task, tick, plan) {
         const parts = [`- ${checkbox(tick)} **${task.title}**${aiTag(task)} %%task:${task.id}%%`];
@@ -2165,41 +2268,77 @@ const Curriculum = (() => {
         parts.push(renderPlan(task, plan));
         return parts.join('\n\n');
     }
-    function renderFeedback(lesson, lessonLink, tasks, ticks, plans) {
-        const brief = tasks.find((task) => task.isBrief);
-        const items = tasks.filter((task) => !task.isBrief);
-        const open = tasks.filter((task) => !ticks.has(task.id)).length;
-        // Only still-open items count: a ticked one is finished work, whoever did it.
-        const aiReady = tasks.filter((task) => task.aiReady && !ticks.has(task.id)).length;
-        const planFor = (task) => plans.get(task.id) ?? { text: '', base: hashPlan('') };
+    /** A lesson's tasks and feedback from Chalkenso, sorted into its note's sections. */
+    function lessonSections(entry) {
+        const open = entry.tasks.filter((task) => OPEN_TASK_STATUSES.includes(task.status));
+        // Feedback a task uses shows with that task; on its own it's open (nobody used it) or answered.
+        const own = entry.feedback.filter((comment) => !comment.taskIds?.length);
+        const done = [
+            ...entry.tasks.filter((task) => task.status === 'DONE').map((task) => ({ at: task.completedAt ?? task.updatedAt, md: renderDoneTask(task) })),
+            ...own.filter((comment) => comment.status !== 'OPEN').map((comment) => ({ at: comment.resolvedAt ?? comment.createdAt, md: renderDoneFeedback(comment) })),
+        ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+        return {
+            unused: own.filter((comment) => comment.status === 'OPEN'),
+            improvements: open.filter((task) => !task.isBrief),
+            brief: open.find((task) => task.isBrief) ?? null,
+            done,
+        };
+    }
+    /** The open tasks the vault works on (not the app's), improvements and brief. */
+    function vaultTasks(sections) {
+        return [...sections.improvements, ...(sections.brief ? [sections.brief] : [])].filter((task) => task.workplace !== 'APP');
+    }
+    /** The plan to write for a task: one edited in the note and not in Chalkenso yet stays; else Chalkenso's. */
+    function planToRender(task, mine) {
+        const remote = normalizePlan(task.plan);
+        return mine && isPlanEdited(mine) && mine.text !== remote
+            ? { text: mine.text, base: mine.base ?? hashPlan('') }
+            : { text: remote, base: hashPlan(remote) };
+    }
+    const FEEDBACK_NOTE_INFO = '> [!info] How to use this note\n' +
+        '> **Open** is feedback nobody has used yet. Tick it `[x]` when it is answered, with your answer ' +
+        'after **Reply:** (the learner sees it), and it is done in Chalkenso on the next pull.\n' +
+        "> **Improvement** is the lesson's open work. Its **Plan** is what the revision executes; a plan " +
+        "sent from here also uses the open feedback that isn't ticked. Tick `[x]` when the lesson is " +
+        'fixed, `[-]` to skip it; it closes when the lesson is uploaded.\n' +
+        `> An item tagged \`${AI_READY_TAG}\` is cleared for an assistant: it may edit the lesson to the ` +
+        'plan and tick the item itself. Untagged items are assist-only.\n' +
+        '> **Done** is the record, wherever it was finished. Everything except the checkboxes, replies and ' +
+        'plans is replaced on the next pull.';
+    /** The note for one lesson; `local` is what the note already had (`ticks`, `answers`, `plans`). */
+    function renderFeedback(lesson, lessonLink, sections, local) {
+        const { unused, improvements, brief, done } = sections;
+        const ours = vaultTasks(sections);
+        const planFor = (task) => planToRender(task, local.plans.get(task.id));
         const frontmatter = {
             [FRONTMATTER.lessonId]: lesson.id,
             lesson: lessonLink ?? lesson.title,
-            open,
+            // Still to do here: open feedback and the vault's open work, not ticked yet.
+            open: unused.filter((comment) => !local.answers.get(comment.id)?.ticked).length + ours.filter((task) => !local.ticks.has(task.id)).length,
             // Lets one Dataview query across the vault list what an assistant may pick up.
-            aiReady,
+            aiReady: ours.filter((task) => task.aiReady && !local.ticks.has(task.id)).length,
         };
-        const sections = [
-            `# Feedback: ${lessonLink ?? `Lesson ${lesson.position}: ${lesson.title}`}`,
-            '> [!info] How to use this note\n' +
-                "> Write what should change under each item's **Plan**: that plan is what the revision " +
-                'executes, and it is sent to the task in the dashboard on every feedback pull and lesson ' +
-                'upload. Comments are context only.\n' +
-                '> Tick `[x]` when an item is done or `[-]` to skip it; ticked items close when the lesson ' +
-                'is uploaded. Everything except the checkboxes and plans is replaced on the next pull.\n' +
-                `> An item tagged \`${AI_READY_TAG}\` is cleared for an assistant: it may edit the lesson ` +
-                'to the plan and tick the item itself. Untagged items are assist-only — an assistant ' +
-                'writes its proposal under **Plan** and leaves the lesson to you.',
-        ];
+        const parts = [`# Feedback: ${lessonLink ?? `Lesson ${lesson.position}: ${lesson.title}`}`, FEEDBACK_NOTE_INFO];
+        parts.push(`## Open\n\n${unused.length
+            ? unused.map((comment) => renderOpenFeedback(comment, local.answers.get(comment.id))).join('\n\n')
+            : '_Nothing open: all feedback on this lesson is used or answered._'}`);
+        const work = improvements.map((task) => task.workplace === 'APP' ? renderAppTask(task) : renderItem(task, local.ticks.get(task.id), planFor(task)));
+        const fresh = local.plans.get(NEW_PLAN);
+        if (!improvements.length && (unused.length || fresh?.text)) {
+            const plan = fresh?.text ? { text: fresh.text, base: fresh.base ?? hashPlan('') } : { text: '', base: hashPlan('') };
+            work.push("No improvement yet. A plan written here uses the open feedback that isn't ticked and starts the lesson's improvement.\n\n" +
+                renderPlan({ id: NEW_PLAN }, plan));
+        }
+        if (work.length) {
+            parts.push(`## Improvement\n\n${work.join('\n\n')}`);
+        }
         if (brief) {
-            sections.push(`## Brief\n\n${renderBrief(brief, ticks.get(brief.id), planFor(brief))}`);
+            parts.push(`## Brief\n\n${brief.workplace === 'APP' ? renderAppTask(brief) : renderBrief(brief, local.ticks.get(brief.id), planFor(brief))}`);
         }
-        if (items.length > 0) {
-            sections.push(`## Items\n\n${items
-                .map((item) => renderItem(item, ticks.get(item.id), planFor(item)))
-                .join('\n\n')}`);
+        if (done.length) {
+            parts.push(`## Done\n\n${done.map((entry) => entry.md).join('\n\n')}`);
         }
-        return `---\n${stringifyYaml(frontmatter)}---\n\n${sections.join('\n\n')}\n`;
+        return `---\n${stringifyYaml(frontmatter)}---\n\n${parts.join('\n\n')}\n`;
     }
     /** Feedback notes in the mapping's active feedback folder, keyed by lesson id. */
     function collectFeedbackFiles(app, mapping) {
@@ -2280,49 +2419,112 @@ const Curriculum = (() => {
             await app.vault.createFolder(path);
         }
     }
-    /**
-     * Reconciles a task's plan (`{ text, base }`): a plan edited in the note is sent to the dashboard
-     * (and kept, sent or not); an unedited one takes the dashboard's version, which may have come from
-     * another vault. Without write access, edited plans stay local until they can be sent.
-     */
-    async function reconcilePlan(settings, mapping, task, local, canWrite, result) {
-        const remote = normalizePlan(task.plan);
-        if (!local || !isPlanEdited(local) || local.text === remote) {
-            return { text: remote, base: hashPlan(remote) };
+    /** The version's tasks and feedback by lesson: `lessonId → { lesson, tasks, feedback }`. */
+    function groupByLesson(data) {
+        const byLesson = new Map();
+        const entryOf = (lesson) => {
+            if (!byLesson.has(lesson.id)) {
+                byLesson.set(lesson.id, { lesson, tasks: [], feedback: [] });
+            }
+            return byLesson.get(lesson.id);
+        };
+        for (const task of data.tasks) {
+            if (task.lesson) {
+                entryOf(task.lesson).tasks.push(task);
+            }
         }
-        // Keep the old base on failure so the plan still counts as edited and is retried.
-        const unsent = { text: local.text, base: local.base ?? hashPlan('') };
-        if (!canWrite) {
-            return unsent;
+        for (const comment of data.feedback) {
+            if (comment.lesson) {
+                entryOf(comment.lesson).feedback.push(comment);
+            }
         }
-        try {
-            await updateTask(syncTarget(settings, mapping), task.id, { plan: local.text });
-            result.plansSent++;
-            return { text: local.text, base: hashPlan(local.text) };
+        return byLesson;
+    }
+    /** Counts a refused send: 409 means the app works on it (left to the app), anything else is retried. */
+    function countRefusal(result, error, what) {
+        if (error instanceof CurriculumApiError && error.status === 409) {
+            result.inApp++;
+            return;
         }
-        catch (error) {
-            result.plansFailed++;
-            console.warn(`Chalkenso: could not send the plan for ${task.id}`, error);
-            return unsent;
-        }
+        result[what]++;
+        console.warn(`Chalkenso: could not send ${what === 'answersFailed' ? 'an answer' : 'a plan'}`, error);
     }
     /**
-     * Mirrors the dashboard's in-progress feedback into one note per lesson. Plans edited in the note
-     * are sent first (with `canWrite`); local ticks that have not been sent yet are kept; items closed
-     * or moved back in the dashboard drop out; lessons with nothing left lose their note and their
-     * `feedback` link.
+     * Sends what was done in a lesson's note since the last pull: ticked open feedback with its reply
+     * (it's answered and done), a plan under the `new` heading (it starts the improvement with the
+     * open feedback that isn't ticked), and the vault's changed plans (with that feedback, which joins
+     * the improvement). Returns whether Chalkenso changed. What fails stays in the note and is retried.
+     */
+    async function sendNoteChanges(target, lessonId, sections, content, result) {
+        const answers = parseAnswers(content);
+        const plans = parsePlans(content);
+        const unused = new Set(sections.unused.map((comment) => comment.id));
+        let changed = false;
+        for (const [commentId, answer] of answers) {
+            if (!answer.ticked || !unused.has(commentId)) {
+                continue;
+            }
+            try {
+                await answerFeedback(target, commentId, answer.reply);
+                result.answered++;
+                changed = true;
+            }
+            catch (error) {
+                countRefusal(result, error, 'answersFailed');
+            }
+        }
+        const stillOpen = sections.unused.filter((comment) => !answers.get(comment.id)?.ticked).map((comment) => comment.id);
+        const fresh = plans.get(NEW_PLAN);
+        if (fresh?.text && isPlanEdited(fresh) && !sections.improvements.length && stillOpen.length) {
+            try {
+                await createImprovement(target, { lessonId, plan: fresh.text, feedbackIds: stillOpen });
+                result.plansSent++;
+                changed = true;
+            }
+            catch (error) {
+                countRefusal(result, error, 'plansFailed');
+            }
+        }
+        for (const task of vaultTasks(sections)) {
+            const plan = plans.get(task.id);
+            if (!plan || !isPlanEdited(plan) || plan.text === normalizePlan(task.plan)) {
+                continue;
+            }
+            try {
+                await updateTask(target, task.id, { plan: plan.text, ...(task.isBrief || !stillOpen.length ? {} : { useFeedback: stillOpen }) });
+                result.plansSent++;
+                changed = true;
+            }
+            catch (error) {
+                countRefusal(result, error, 'plansFailed');
+            }
+        }
+        return changed;
+    }
+    /**
+     * Mirrors the lesson's feedback in Chalkenso, done included, into one note per lesson. With
+     * `canWrite`, what was done in the notes is sent first (answers, plans) and the feedback read
+     * again. Local ticks, replies and plans not sent yet are kept; lessons with no feedback at all
+     * lose their note and their `feedback` link.
      */
     async function pullFeedback(app, settings, mapping, canWrite = true) {
-        const result = { lessons: 0, items: 0, removed: 0, plansSent: 0, plansFailed: 0 };
-        const tasks = await fetchTasks(syncTarget(settings, mapping));
-        const byLesson = new Map();
-        for (const task of tasks) {
-            if (task.lesson) {
-                byLesson.set(task.lesson.id, [...(byLesson.get(task.lesson.id) ?? []), task]);
+        const result = { lessons: 0, open: 0, improvements: 0, done: 0, removed: 0, answered: 0, answersFailed: 0, plansSent: 0, plansFailed: 0, inApp: 0 };
+        const target = syncTarget(settings, mapping);
+        let byLesson = groupByLesson(await fetchFeedback(target));
+        const existing = collectFeedbackFiles(app, mapping);
+        if (canWrite) {
+            let changed = false;
+            for (const [lessonId, file] of existing) {
+                const entry = byLesson.get(lessonId);
+                if (entry && (await sendNoteChanges(target, lessonId, lessonSections(entry), await app.vault.read(file), result))) {
+                    changed = true;
+                }
+            }
+            if (changed) {
+                byLesson = groupByLesson(await fetchFeedback(target));
             }
         }
         const folder = feedbackFolderPath(mapping);
-        const existing = collectFeedbackFiles(app, mapping);
         const lessonNotes = lessonNotesById(app, mapping);
         for (const [lessonId, file] of existing) {
             if (!byLesson.has(lessonId)) {
@@ -2338,8 +2540,8 @@ const Curriculum = (() => {
         if (byLesson.size > 0) {
             await ensureFolder(app, folder);
         }
-        for (const [lessonId, lessonTasks] of byLesson) {
-            const lesson = lessonTasks[0].lesson;
+        for (const [lessonId, entry] of byLesson) {
+            const lesson = entry.lesson;
             const lessonFile = lessonNotes.get(lessonId) ?? null;
             // Prefixed so the note never shares a basename with the lesson (keeps [[links]] unambiguous).
             const lessonName = lessonFile?.basename ?? `Lesson ${lesson.position} - ${lesson.title}`;
@@ -2349,13 +2551,9 @@ const Curriculum = (() => {
                 : null;
             let file = existing.get(lessonId) ?? null;
             const current = file ? await app.vault.read(file) : '';
-            const ticks = parseTicks(current);
-            const localPlans = parsePlans(current);
-            const plans = new Map();
-            for (const task of lessonTasks) {
-                plans.set(task.id, await reconcilePlan(settings, mapping, task, localPlans.get(task.id), canWrite, result));
-            }
-            const content = renderFeedback(lesson, lessonLink, lessonTasks, ticks, plans);
+            const local = { ticks: parseTicks(current), answers: parseAnswers(current), plans: parsePlans(current) };
+            const sections = lessonSections(entry);
+            const content = renderFeedback(lesson, lessonLink, sections, local);
             if (file && file.path !== path && !app.vault.getAbstractFileByPath(path)) {
                 await app.fileManager.renameFile(file, path);
             }
@@ -2372,7 +2570,9 @@ const Curriculum = (() => {
                 await setLessonFeedbackLink(app, lessonFile, feedbackLink);
             }
             result.lessons++;
-            result.items += lessonTasks.length;
+            result.open += sections.unused.length + sections.improvements.length + (sections.brief ? 1 : 0);
+            result.improvements += sections.improvements.length;
+            result.done += sections.done.length;
         }
         return result;
     }
@@ -2411,7 +2611,8 @@ const Curriculum = (() => {
                 result.pushed++;
             }
             catch (error) {
-                if (error instanceof CurriculumApiError && error.status === 404) {
+                // Gone, or worked on in the app (finished there): nothing for the vault to close.
+                if (error instanceof CurriculumApiError && (error.status === 404 || error.status === 409)) {
                     result.pushed++;
                     continue;
                 }
@@ -4264,28 +4465,45 @@ const Curriculum = (() => {
          * that a lesson sync just closed, so one notice covers both.
          */
         async pullFeedbackForMapping(mapping, pushed) {
-            // Feedback needs READ + TASKS on the workspace (per /me); without them there's nothing to pull.
-            if (!this.canPullFeedback(mapping) || this.groupState(mapping)) {
+            if (this.groupState(mapping)) {
+                return;
+            }
+            // Feedback needs READ + TASKS on the workspace (per /me): say so rather than do nothing.
+            if (!this.canPullFeedback(mapping)) {
+                new Notice(`Chalkenso: no feedback for "${mapping.path || '/'}": your access there doesn't include feedback and improvements. Ask for it in Chalkenso.`);
                 return;
             }
             // A plan typed a moment ago must be on disk before the note is read and regenerated.
             await this.flushOpenEditors();
             try {
                 const result = await pullFeedback(this.app, this.settings, mapping, this.canPushTicks(mapping));
-                const parts = [`${result.items} open item(s) across ${result.lessons} lesson(s)`];
-                if (result.plansSent) {
-                    parts.unshift(`${result.plansSent} plan(s) sent`);
-                }
+                const sent = [];
                 if (pushed?.pushed) {
-                    parts.unshift(`${pushed.pushed} closed`);
+                    sent.push(`${pushed.pushed} closed`);
                 }
+                if (result.answered) {
+                    sent.push(`${result.answered} answered`);
+                }
+                if (result.plansSent) {
+                    sent.push(`${result.plansSent} plan(s) sent`);
+                }
+                const kept = [];
                 if (pushed?.failed) {
-                    parts.push(`${pushed.failed} could not be closed (kept ticked, retried next sync)`);
+                    kept.push(`${pushed.failed} could not be closed (kept ticked, retried next sync)`);
+                }
+                if (result.answersFailed) {
+                    kept.push(`${result.answersFailed} answer(s) could not be sent (kept, retried next sync)`);
                 }
                 if (result.plansFailed) {
-                    parts.push(`${result.plansFailed} plan(s) could not be sent (kept, retried next sync)`);
+                    kept.push(`${result.plansFailed} plan(s) could not be sent (kept, retried next sync)`);
                 }
-                new Notice(`Chalkenso: feedback for "${mapping.path || '/'}" — ${parts.join(', ')}.`);
+                if (result.inApp) {
+                    kept.push(`${result.inApp} worked on in the app (left to the app)`);
+                }
+                const found = result.lessons
+                    ? `${result.lessons} lesson(s): ${result.open} open, ${result.improvements} improvement(s), ${result.done} done`
+                    : 'no feedback on these lessons yet';
+                new Notice(`Chalkenso: feedback for "${mapping.path || '/'}" — ${[...sent, found, ...kept].join(', ')}.`);
             }
             catch (error) {
                 this.noticeError(`pull feedback for "${mapping.path || '/'}"`, error);
@@ -4400,8 +4618,8 @@ const Curriculum = (() => {
             this.addFeedbackItems(menu, file);
         }
         /**
-         * Sends the feedback note's changed plans to their tasks and re-stamps their markers as synced.
-         * Only the markers change; the note is not regenerated. Plans that fail stay "not synced".
+         * "Upload feedback plan": sends what was done in the feedback notes (plans, answers) and reads
+         * the feedback again, the same as a pull. Plans that fail stay "not synced".
          */
         async uploadPlans(file) {
             const mapping = findFeedbackFolderMapping(this.settings, file.path);
@@ -4412,45 +4630,14 @@ const Curriculum = (() => {
                 new Notice('Chalkenso: this workspace does not allow updating tasks (needs WRITE + TASKS).');
                 return;
             }
-            await this.flushOpenEditors();
             this.planUploadingPath = file.path;
             this.updatePlanStatus();
-            const sent = new Map();
-            let failed = 0;
             try {
-                for (const [taskId, plan] of parsePlans(await this.app.vault.read(file))) {
-                    if (!isPlanEdited(plan)) {
-                        continue;
-                    }
-                    try {
-                        await updateTask(syncTarget(this.settings, mapping), taskId, { plan: plan.text });
-                        sent.set(taskId, plan.text);
-                    }
-                    catch (error) {
-                        failed++;
-                        console.warn(`Chalkenso: could not send the plan for ${taskId}`, error);
-                    }
-                }
-                if (sent.size > 0) {
-                    // Stamps the text that was sent; anything typed meanwhile stays "not synced".
-                    await this.app.vault.process(file, (content) => markPlansSynced(content, sent));
-                }
-            }
-            catch (error) {
-                this.noticeError('upload plan', error);
+                await this.pullFeedbackForMapping(mapping);
             }
             finally {
                 this.planUploadingPath = null;
                 this.updatePlanStatus();
-            }
-            if (sent.size === 0 && failed === 0) {
-                new Notice('Chalkenso: plan already synced.');
-            }
-            else if (failed > 0) {
-                new Notice(`Chalkenso: ${sent.size} plan(s) uploaded, ${failed} failed (still marked not synced — see console).`);
-            }
-            else {
-                new Notice(`Chalkenso: ${sent.size} plan(s) uploaded to Chalkenso.`);
             }
         }
         /** Writes every open editor to disk, so the note on disk has what was just typed. */

@@ -318,11 +318,14 @@ class Course:
 
 
 ITEM_LINE = re.compile(r"^\s*[-*]\s+\[(.)\]\s+(.*?)%%task:([A-Za-z0-9_-]+)%%")
+# Open feedback nobody has used yet: it needs a plan (in the improvement) or an answer.
+FEEDBACK_LINE = re.compile(r"^\s*[-*]\s+\[(.)\]\s+(.*?)%%feedback:([A-Za-z0-9_-]+)%%")
 PLAN_LINE = re.compile(r"^#{1,6}\s+Plan\b.*%%plan:([A-Za-z0-9_-]+)(?::[0-9a-f]*)?%%\s*$")
 
 
 def load_feedback(folder):
-    """Every item in a folder's feedback notes, read the way the plugin writes them."""
+    """Every item in a folder's feedback notes (improvements, briefs and open feedback), read the
+    way the plugin writes them. Done work is folded into callouts there, so it isn't read."""
     items = []
     for sub in ("_feedback", "_feedback-dev"):
         full = os.path.join(VAULT, folder, sub)
@@ -336,6 +339,16 @@ def load_feedback(folder):
             lesson = link_target(fm["lesson"]) if fm.get("lesson") else re.sub(r"^Feedback - ", "", name[:-3])
             note_items, plans, plan_id = [], defaultdict(list), None
             for line in body.splitlines():
+                loose = FEEDBACK_LINE.match(line)
+                if loose:
+                    title = re.search(r"\*\*(.+?)\*\*", loose.group(2))
+                    note_items.append({
+                        "task": loose.group(3), "state": loose.group(1),
+                        "title": title.group(1) if title else loose.group(2).strip(),
+                        "ai": False, "note": path, "lesson": lesson, "feedback": True,
+                        "folder": folder, "dev": sub.endswith("-dev")})
+                    plan_id = None
+                    continue
                 item = ITEM_LINE.match(line)
                 if item:
                     title = re.search(r"\*\*(.+?)\*\*", item.group(2))

@@ -188,17 +188,25 @@ Every deletion goes to Obsidian's trash (`.trash`), never a hard delete.
 
 ## Feedback and plans
 
-**Pull feedback** (also part of every sync) writes one note per lesson with open feedback into the
-folder's `_feedback/`. Each item has a checkbox, the reviewer's comment (context only) and a
-`#### Plan` section:
+**Pull feedback** (also part of every sync) writes one note per lesson with all of its feedback into
+the folder's `_feedback/`, done included, so the whole loop works from the vault. The notice says what
+came down and what went up ("2 lesson(s): 3 open, 1 improvement(s), 12 done").
 
-- Write what should change under each item's **Plan**. The note is the plan's source of truth: plans
-  are sent to the task in Chalkenso on every pull and upload, and with **Upload feedback plan**. The
-  status bar shows *Synced*, *Not synced*, *Uploading…* or *No plan yet* as you type.
-- Tick `[x]` when an item is done or `[-]` to skip it. Ticks are sent after the lesson itself is
-  uploaded, so feedback closes only once the fix is in Chalkenso.
-- Hidden `%%task:…%%` and `%%plan:…%%` markers connect items to their tasks; keep them. Everything
-  outside the checkboxes and plans is regenerated on each pull.
+- **Open**: feedback nobody has used yet, learner feedback and instructor notes. Tick `[x]` when it's
+  answered, with your answer after **Reply:** (the learner sees it): on the next pull it's answered and
+  done in Chalkenso, as Reply does there.
+- **Improvement**: the lesson's open improvement, with the feedback it uses and a `#### Plan`. The
+  note is the plan's source of truth: plans are sent on every pull and upload, and with **Upload
+  feedback plan**, together with the open feedback that isn't ticked, which joins the improvement.
+  With no improvement yet, a plan under its heading starts one with that feedback. The status bar
+  shows *Synced*, *Not synced*, *Uploading…* or *No plan yet* as you type.
+- Tick the improvement `[x]` when the lesson is fixed or `[-]` to skip it. Ticks are sent after the
+  lesson itself is uploaded, so the feedback closes only once the fix is in Chalkenso.
+- An improvement being worked on in the app is shown read-only: finish it there.
+- **Done**: everything finished, wherever it was finished, folded. Something finished in the app
+  moves here on the next pull.
+- Hidden `%%feedback:…%%`, `%%task:…%%` and `%%plan:…%%` markers connect items to Chalkenso; keep
+  them. Everything except the checkboxes, replies and plans is regenerated on each pull.
 
 **`#ai/ready`.** An item cleared in Chalkenso for an AI assistant arrives tagged `#ai/ready` on its
 checkbox line, and the note's `aiReady` property counts the open ones. Tagged items may be carried
@@ -344,8 +352,10 @@ Every request sends `Authorization: Bearer usr_…`; curriculum requests also se
 | POST | `/api/sync/assets/presign` | `{ filename, contentType, bytes, checksum, sourcePath }` → `{ reused, assetId, uploadUrl? }`; a known image is reused, a new one is PUT to `uploadUrl` |
 | POST | `/api/sync/assets/:id/complete` | `{ checksum, sourcePath }` after the PUT → `{ asset }` |
 | GET | `/api/sync/assets/:id/url` | Short-lived download link for an image missing from the vault |
-| GET | `/api/sync/tasks` | Open feedback (items and briefs) |
-| PATCH | `/api/sync/tasks/:id` | `{ status?, plan?, aiReady? }` |
+| GET | `/api/sync/tasks` | `{ tasks, feedback }`: the improvements and briefs in any state but ignored (with `workplace`), and the feedback, open and recent done, each with the tasks that use it |
+| PATCH | `/api/sync/tasks/:id` | `{ status?, plan?, aiReady?, useFeedback? }`; 409 `worked_in_app` for one worked on in the app |
+| POST | `/api/sync/improvements` | `{ lessonId, plan, feedbackIds }`: the feedback joins the lesson's improvement (or starts one), which takes the plan → `{ task }` |
+| PATCH | `/api/sync/feedback/:id` | `{ status: "RESOLVED", reply? }`: answered (and done when no improvement uses it) |
 
 Any curriculum route answers `410 { reason: "group_curriculum_closed" }` for a closed group
 curriculum; the plugin then cleans up that group's folder.
