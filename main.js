@@ -2144,6 +2144,10 @@ const Curriculum = (() => {
         if (instructions && instructions !== comment?.body.trim()) {
             blocks.push(`**Dashboard instructions:** ${instructions}`);
         }
+        // The instructor's own words about the change, for whoever plans or drafts it.
+        if (task.aiNotes?.trim()) {
+            blocks.push(`**Notes for AI:** ${task.aiNotes.trim()}`);
+        }
         blocks.push(...notesBlocks(task));
         if (blocks.length > 0) {
             const who = comments.length > 1 ? `${comments.length} pieces of feedback` : comment?.proposerName ?? task.proposerName;
@@ -2154,7 +2158,7 @@ const Curriculum = (() => {
     }
     function renderBrief(task, tick, plan) {
         const parts = [`- ${checkbox(tick)} **Revision brief**${aiTag(task)} %%task:${task.id}%%`];
-        const blocks = [task.description?.trim() ?? '', ...notesBlocks(task)];
+        const blocks = [task.description?.trim() ?? '', task.aiNotes?.trim() ? `**Notes for AI:** ${task.aiNotes.trim()}` : '', ...notesBlocks(task)];
         if (blocks.some((block) => block)) {
             parts.push(callout('[!quote] Brief from the dashboard', blocks));
         }
