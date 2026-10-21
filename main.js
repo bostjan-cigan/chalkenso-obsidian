@@ -2113,30 +2113,41 @@ const Curriculum = (() => {
     function aiTag(task) {
         return task.aiReady ? ` ${AI_READY_TAG}` : '';
     }
+    /** One piece of feedback as callout blocks: the passage, what was said, where, and the reply. */
+    function commentBlocks(comment, heading) {
+        const blocks = [];
+        if (heading) {
+            blocks.push(`**${heading}:**`);
+        }
+        blocks.push(quote(comment.selectedText));
+        blocks.push(comment.body.trim());
+        const excerpt = comment.context ? contextExcerpt(comment.context, comment.selectedText) : null;
+        if (excerpt) {
+            blocks.push(`**In context:**\n${quote(excerpt)}`);
+        }
+        if (comment.adminResponse?.trim()) {
+            blocks.push(`**Reply to reviewer:** ${comment.adminResponse.trim()}`);
+        }
+        return blocks;
+    }
     function renderItem(task, tick, plan) {
         const parts = [`- ${checkbox(tick)} **${task.title}**${aiTag(task)} %%task:${task.id}%%`];
-        const comment = task.sourceComment;
+        // One improvement per lesson uses several pieces of feedback (older servers send only one).
+        const comments = task.sourceComments ?? (task.sourceComment ? [task.sourceComment] : []);
+        const comment = comments[0];
         const instructions = task.description?.trim();
         const blocks = [];
-        if (comment) {
-            blocks.push(quote(comment.selectedText));
-            blocks.push(comment.body.trim());
-            const excerpt = comment.context ? contextExcerpt(comment.context, comment.selectedText) : null;
-            if (excerpt) {
-                blocks.push(`**In context:**\n${quote(excerpt)}`);
-            }
-            if (comment.adminResponse?.trim()) {
-                blocks.push(`**Reply to reviewer:** ${comment.adminResponse.trim()}`);
-            }
-        }
+        comments.forEach((each) => {
+            blocks.push(...commentBlocks(each, comments.length > 1 ? each.proposerName : null));
+        });
         // Promoted tasks default their instructions to the comment body; only show them when edited.
         if (instructions && instructions !== comment?.body.trim()) {
             blocks.push(`**Dashboard instructions:** ${instructions}`);
         }
         blocks.push(...notesBlocks(task));
         if (blocks.length > 0) {
-            const who = comment?.proposerName ?? task.proposerName;
-            parts.push(callout(`[!quote] ${who ? `${who} commented` : 'Context'}`, blocks));
+            const who = comments.length > 1 ? `${comments.length} pieces of feedback` : comment?.proposerName ?? task.proposerName;
+            parts.push(callout(`[!quote] ${who ? (comments.length > 1 ? who : `${who} commented`) : 'Context'}`, blocks));
         }
         parts.push(renderPlan(task, plan));
         return parts.join('\n\n');
