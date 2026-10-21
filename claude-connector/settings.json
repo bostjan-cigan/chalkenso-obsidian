@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 .claude/scripts/lessons.py *)",
+      "Bash(python3 .claude/scripts/sync_state.py check *)",
+      "Bash(python3 .claude/scripts/graph.py *)",
+      "Bash(python3 .claude/scripts/graph_colors.py)",
+      "Bash(python3 .claude/scripts/build_canvases.py)",
+      "Bash(python3 .claude/scripts/build_canvases.py *)",
+      "Edit(.obsidian/graph.json)",
+      "mcp__chalkenso__list_courses",
+      "mcp__chalkenso__get_course_outline",
+      "mcp__chalkenso__get_course_health",
+      "mcp__chalkenso__get_lesson",
+      "mcp__chalkenso__get_revision_brief",
+      "mcp__chalkenso__get_task",
+      "mcp__chalkenso__list_tasks",
+      "mcp__chalkenso__list_proposals"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/scripts/lessons.py\" stop",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
