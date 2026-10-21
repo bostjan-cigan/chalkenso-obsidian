@@ -86,8 +86,8 @@ All of a lesson's feedback reaches the vault as one feedback note: `_feedback/Fe
   `%%task:<id>%%` marker and a `#### Plan %%plan:<id>:<hash>%%` heading. The plan under that heading
   is sent to Chalkenso and is **the source of truth** for what changes, in the group copy and in
   core. A plan sent also uses the open feedback that isn't ticked: it joins the improvement. With no
-  improvement yet, the heading is `%%plan:new:…%%`, and a plan there starts one. One marked *worked
-  on in Chalkenso* has no checkbox or plan heading: leave it, it's finished in the app.
+  improvement yet, the heading is `%%plan:new:…%%`, and a plan there starts one. One started in the app says
+  *Started in Chalkenso*: working on it here takes it over, so plan and apply it like any other.
 - **Done**: what's finished, folded. Read it for history; never edit it.
 
 - Write only the text under `#### Plan` headings, after `Reply:`, and the checkboxes (`[x]` done,

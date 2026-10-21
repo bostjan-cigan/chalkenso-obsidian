@@ -1960,12 +1960,12 @@ const Curriculum = (() => {
      *   assistant, executes; the note is its source of truth, sent on every pull and lesson upload,
      *   with the open feedback that isn't ticked, which joins the improvement. With no improvement
      *   yet, a plan written under its `new` heading starts one with that feedback. Tick `[x]` when it's
-     *   done, `[-]` to skip it; ticks are sent when the lesson is uploaded. One worked on in the app is
-     *   shown read-only: it's finished there.
+     *   done, `[-]` to skip it; ticks are sent when the lesson is uploaded. One started in the app says
+     *   so: a plan or tick sent from here takes it over (the app's "Work on it here" takes it back).
      * - **Done**: what's finished, wherever it was finished, folded. Read-only.
      *
-     * Everything outside the checkboxes, replies and plans is regenerated. Whichever side finishes
-     * first wins: something done in the app moves to Done on the next pull.
+     * Everything outside the checkboxes, replies and plans is regenerated. Something finished in the
+     * app moves to Done on the next pull.
      *
      * Plan headings carry a hidden `%%plan:<taskId>:<hash>%%` marker; the hash is of the plan as last
      * agreed with the dashboard, so a pull can tell a local edit (send it) from a plan updated
@@ -2211,14 +2211,6 @@ const Curriculum = (() => {
         const comments = task.sourceComments ?? (task.sourceComment ? [task.sourceComment] : []);
         return comments.flatMap((comment) => commentBlocks(comment, comments.length > 1 ? comment.proposerName : null));
     }
-    /** An open task worked on in the app: read-only here (no checkbox, no plan heading). */
-    function renderAppTask(task) {
-        const blocks = [...taskCommentBlocks(task)];
-        if (task.plan?.trim()) {
-            blocks.push(`**Plan:**\n${task.plan.trim()}`);
-        }
-        return `- **${task.isBrief ? 'Revision brief' : task.title}** · worked on in Chalkenso\n\n${callout('[!note] Being worked on in the app: finish it there. It moves to Done here once it is finished.', blocks)}`;
-    }
     /** A finished task, folded: the feedback it used and its plan. */
     function renderDoneTask(task) {
         const blocks = [...taskCommentBlocks(task)];
@@ -2233,8 +2225,13 @@ const Curriculum = (() => {
         const excerpt = words.slice(0, 8).join(' ') + (words.length > 8 ? '…' : '');
         return callout(`[!done]- ${feedbackFrom(comment)}: “${excerpt}” · done ${noteDate(comment.resolvedAt ?? comment.createdAt)}`, commentBlocks(comment, null));
     }
+    /** Under the checkbox of a task started in the app: working on it here takes it over. */
+    const STARTED_IN_APP = '_Started in Chalkenso: a plan or a tick sent from here takes it over._';
     function renderItem(task, tick, plan) {
         const parts = [`- ${checkbox(tick)} **${task.title}**${aiTag(task)} %%task:${task.id}%%`];
+        if (task.workplace === 'APP') {
+            parts.push(STARTED_IN_APP);
+        }
         // One improvement per lesson uses several pieces of feedback (older servers send only one).
         const comments = task.sourceComments ?? (task.sourceComment ? [task.sourceComment] : []);
         const comment = comments[0];
@@ -2261,6 +2258,9 @@ const Curriculum = (() => {
     }
     function renderBrief(task, tick, plan) {
         const parts = [`- ${checkbox(tick)} **Revision brief**${aiTag(task)} %%task:${task.id}%%`];
+        if (task.workplace === 'APP') {
+            parts.push(STARTED_IN_APP);
+        }
         const blocks = [task.description?.trim() ?? '', task.aiNotes?.trim() ? `**Notes for AI:** ${task.aiNotes.trim()}` : '', ...notesBlocks(task)];
         if (blocks.some((block) => block)) {
             parts.push(callout('[!quote] Brief from the dashboard', blocks));
@@ -2284,9 +2284,9 @@ const Curriculum = (() => {
             done,
         };
     }
-    /** The open tasks the vault works on (not the app's), improvements and brief. */
+    /** The open tasks in a note: the improvements and the brief, wherever they were started. */
     function vaultTasks(sections) {
-        return [...sections.improvements, ...(sections.brief ? [sections.brief] : [])].filter((task) => task.workplace !== 'APP');
+        return [...sections.improvements, ...(sections.brief ? [sections.brief] : [])];
     }
     /** The plan to write for a task: one edited in the note and not in Chalkenso yet stays; else Chalkenso's. */
     function planToRender(task, mine) {
@@ -2322,7 +2322,7 @@ const Curriculum = (() => {
         parts.push(`## Open\n\n${unused.length
             ? unused.map((comment) => renderOpenFeedback(comment, local.answers.get(comment.id))).join('\n\n')
             : '_Nothing open: all feedback on this lesson is used or answered._'}`);
-        const work = improvements.map((task) => task.workplace === 'APP' ? renderAppTask(task) : renderItem(task, local.ticks.get(task.id), planFor(task)));
+        const work = improvements.map((task) => renderItem(task, local.ticks.get(task.id), planFor(task)));
         const fresh = local.plans.get(NEW_PLAN);
         if (!improvements.length && (unused.length || fresh?.text)) {
             const plan = fresh?.text ? { text: fresh.text, base: fresh.base ?? hashPlan('') } : { text: '', base: hashPlan('') };
@@ -2333,7 +2333,7 @@ const Curriculum = (() => {
             parts.push(`## Improvement\n\n${work.join('\n\n')}`);
         }
         if (brief) {
-            parts.push(`## Brief\n\n${brief.workplace === 'APP' ? renderAppTask(brief) : renderBrief(brief, local.ticks.get(brief.id), planFor(brief))}`);
+            parts.push(`## Brief\n\n${renderBrief(brief, local.ticks.get(brief.id), planFor(brief))}`);
         }
         if (done.length) {
             parts.push(`## Done\n\n${done.map((entry) => entry.md).join('\n\n')}`);
@@ -2440,12 +2440,8 @@ const Curriculum = (() => {
         }
         return byLesson;
     }
-    /** Counts a refused send: 409 means the app works on it (left to the app), anything else is retried. */
+    /** Counts a send that failed: it stays in the note and is retried on the next pull. */
     function countRefusal(result, error, what) {
-        if (error instanceof CurriculumApiError && error.status === 409) {
-            result.inApp++;
-            return;
-        }
         result[what]++;
         console.warn(`Chalkenso: could not send ${what === 'answersFailed' ? 'an answer' : 'a plan'}`, error);
     }
@@ -2508,7 +2504,7 @@ const Curriculum = (() => {
      * lose their note and their `feedback` link.
      */
     async function pullFeedback(app, settings, mapping, canWrite = true) {
-        const result = { lessons: 0, open: 0, improvements: 0, done: 0, removed: 0, answered: 0, answersFailed: 0, plansSent: 0, plansFailed: 0, inApp: 0 };
+        const result = { lessons: 0, open: 0, improvements: 0, done: 0, removed: 0, answered: 0, answersFailed: 0, plansSent: 0, plansFailed: 0 };
         const target = syncTarget(settings, mapping);
         let byLesson = groupByLesson(await fetchFeedback(target));
         const existing = collectFeedbackFiles(app, mapping);
@@ -2611,8 +2607,7 @@ const Curriculum = (() => {
                 result.pushed++;
             }
             catch (error) {
-                // Gone, or worked on in the app (finished there): nothing for the vault to close.
-                if (error instanceof CurriculumApiError && (error.status === 404 || error.status === 409)) {
+                if (error instanceof CurriculumApiError && error.status === 404) {
                     result.pushed++;
                     continue;
                 }
@@ -4496,9 +4491,6 @@ const Curriculum = (() => {
                 }
                 if (result.plansFailed) {
                     kept.push(`${result.plansFailed} plan(s) could not be sent (kept, retried next sync)`);
-                }
-                if (result.inApp) {
-                    kept.push(`${result.inApp} worked on in the app (left to the app)`);
                 }
                 const found = result.lessons
                     ? `${result.lessons} lesson(s): ${result.open} open, ${result.improvements} improvement(s), ${result.done} done`

@@ -21,8 +21,8 @@ notes holding items cleared for you to carry out.
 
 1. **Read the feedback note.** Note each unticked piece of feedback under **Open** (`- [ ]` with
    `%%feedback:…%%`: the quote, the comment, any reply) and each unticked improvement or brief under
-   **Improvement** (`%%task:…%%`) with the feedback it uses. Skip `[x]` and `[-]` items, anything
-   marked *worked on in Chalkenso*, and the **Done** section (read it only for history: what was
+   **Improvement** (`%%task:…%%`) with the feedback it uses (one *Started in Chalkenso* too: planning
+   it here takes it over). Skip `[x]` and `[-]` items and the **Done** section (read it only for history: what was
    tried before).
 2. **Gather context**:
    - the lesson note (the note's `lesson` property links to it);

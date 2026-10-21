@@ -11,9 +11,9 @@ truth: do what it says, no more.
 ## Steps
 
 1. **Read the feedback note** and pick the items to apply: unticked improvements and briefs under
-   **Improvement** / **Brief** whose plan has text. Skip anything marked *worked on in Chalkenso*,
-   the **Open** feedback (a plan that uses it is sent first: run a feedback pull after
-   `plan-feedback`) and the **Done** section.
+   **Improvement** / **Brief** whose plan has text (one *Started in Chalkenso* too: applying it here
+   takes it over). Skip the **Open** feedback (a plan that uses it is sent first: run a feedback pull
+   after `plan-feedback`) and the **Done** section.
    - **The user named items or lessons:** do those, tagged or not — the ask is the authorization.
      Note in the report which of them were not cleared with `#ai/ready`.
    - **A broad ask** ("apply all open feedback", "work through the ready ones") **or no one

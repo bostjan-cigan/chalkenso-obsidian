@@ -202,7 +202,8 @@ came down and what went up ("2 lesson(s): 3 open, 1 improvement(s), 12 done").
   shows *Synced*, *Not synced*, *Uploading…* or *No plan yet* as you type.
 - Tick the improvement `[x]` when the lesson is fixed or `[-]` to skip it. Ticks are sent after the
   lesson itself is uploaded, so the feedback closes only once the fix is in Chalkenso.
-- An improvement being worked on in the app is shown read-only: finish it there.
+- An improvement started in the app says so. A plan or tick sent from the vault takes it over (it
+  shows *In Obsidian* in the app), and the app's *Work on it here* takes it back.
 - **Done**: everything finished, wherever it was finished, folded. Something finished in the app
   moves here on the next pull.
 - Hidden `%%feedback:…%%`, `%%task:…%%` and `%%plan:…%%` markers connect items to Chalkenso; keep
@@ -353,7 +354,7 @@ Every request sends `Authorization: Bearer usr_…`; curriculum requests also se
 | POST | `/api/sync/assets/:id/complete` | `{ checksum, sourcePath }` after the PUT → `{ asset }` |
 | GET | `/api/sync/assets/:id/url` | Short-lived download link for an image missing from the vault |
 | GET | `/api/sync/tasks` | `{ tasks, feedback }`: the improvements and briefs in any state but ignored (with `workplace`), and the feedback, open and recent done, each with the tasks that use it |
-| PATCH | `/api/sync/tasks/:id` | `{ status?, plan?, aiReady?, useFeedback? }`; 409 `worked_in_app` for one worked on in the app |
+| PATCH | `/api/sync/tasks/:id` | `{ status?, plan?, aiReady?, useFeedback? }`; the task becomes the vault's, also one started in the app |
 | POST | `/api/sync/improvements` | `{ lessonId, plan, feedbackIds }`: the feedback joins the lesson's improvement (or starts one), which takes the plan → `{ task }` |
 | PATCH | `/api/sync/feedback/:id` | `{ status: "RESOLVED", reply? }`: answered (and done when no improvement uses it) |
 
