@@ -6,7 +6,7 @@
 
 For the cloud (chalkenso.com), where Claude Code reaches Chalkenso through the connector and every
 change goes back as a draft to review. A vault that uses the Chalkenso plugin's sync uses the plugin
-kit instead (`obsidian-plugin/claude/install.py`).
+kit instead (`claude/install.py`).
 
 What goes where (the plugin kit's skills, scripts and knowledge, with this kit's on top):
 
@@ -121,7 +121,7 @@ def main():
         sys.exit(f"{vault} is not an Obsidian vault (no .obsidian folder). Open it in Obsidian once first.")
     if os.path.isdir(os.path.join(vault, ".obsidian", "plugins", "chalkenso")):
         sys.exit("This vault has the Chalkenso plugin: it syncs lessons itself. Use the plugin kit instead"
-                 " (obsidian-plugin/claude/install.py), or remove the plugin to work through the connector.")
+                 " (claude/install.py), or remove the plugin to work through the connector.")
     claude = os.path.join(vault, ".claude")
     os.makedirs(os.path.join(claude, "skills"), exist_ok=True)
     os.makedirs(os.path.join(claude, "scripts"), exist_ok=True)

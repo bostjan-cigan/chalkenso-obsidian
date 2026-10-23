@@ -23,13 +23,14 @@ The plugin is a single `main.js` with no build step, plus `manifest.json` and `s
 
 ## Install
 
-The plugin lives in the `obsidian-plugin/` folder of the Chalkenso repository.
-
-1. Create the folder `<vault>/.obsidian/plugins/chalkenso/`.
-2. Copy `main.js`, `manifest.json` and `styles.css` into it (or make that folder a symbolic link to
-   `obsidian-plugin/`, so updates arrive with the repository; Obsidian then keeps the plugin's
-   settings, `data.json`, next to the code, and `.gitignore` keeps it out of git).
+1. Download `main.js`, `manifest.json` and `styles.css` from this repository's
+   [latest release](../../releases/latest).
+2. Put them in `<vault>/.obsidian/plugins/chalkenso/` (create the folder).
 3. In Obsidian, open **Settings → Community plugins**, reload the list and enable **Chalkenso**.
+
+To follow changes as they come, clone this repository and make `<vault>/.obsidian/plugins/chalkenso`
+a symbolic link to it: Obsidian then keeps the plugin's settings, `data.json`, next to the code, and
+`.gitignore` keeps it out of git.
 
 ## Connect
 
@@ -267,7 +268,7 @@ work on the courses with you: check them for the usual curriculum failures, plan
 out plans you approved. It never uploads; you run the plugin's commands. It needs Python 3.8 or later.
 
 ```bash
-python3 obsidian-plugin/claude/install.py "<path to your vault>"
+python3 claude/install.py "<path to your vault>"
 ```
 
 | What | Where it goes |
@@ -288,6 +289,21 @@ The scripts find course folders through the plugin's settings (they read only fo
 (`introduces`, `uses`, `requires`, `objectives`), which never sync. Start with
 *"run enrich-lessons on Web Development"* (your course's name): until lessons have those properties, the graph has little to
 check. `Curriculum Knowledge/README.md` in the vault explains the rest.
+
+### Through the connector (chalkenso.com)
+
+On chalkenso.com, Claude Code can work on your courses without the plugin: it reaches Chalkenso
+through its connector, pulls lessons and their feedback, and everything it sends back waits in
+Chalkenso for your review. `claude-connector/` installs the same skills with the connector's own
+(pull a course, send revisions) on top; it needs `claude/` next to it, as in this repository and in
+`chalkenso-obsidian-kit.zip` from the [latest release](../../releases/latest):
+
+```bash
+python3 claude-connector/install.py "<path to your vault>"
+```
+
+[The Obsidian guide](https://chalkenso.com/docs/obsidian) has the rest: connecting Claude Code, and
+what to ask it.
 
 ## Moving from another server
 
@@ -361,7 +377,11 @@ Every request sends `Authorization: Bearer usr_…`; curriculum requests also se
 Any curriculum route answers `410 { reason: "group_curriculum_closed" }` for a closed group
 curriculum; the plugin then cleans up that group's folder.
 
+## Tests
+
+In this folder: `node tests/organisations.test.cjs`, `node tests/feedback.test.cjs` (the plugin against
+a stand-in for Obsidian and a fake sync API) and `python3 -m unittest discover -s claude-connector/tests`.
+
 ## License
 
-Part of Chalkenso's local edition: [Business Source License 1.1](../LICENSE), with a grant for
-personal use. See [LICENSING.md](../LICENSING.md).
+[MIT](LICENSE). Chalkenso itself, the app this plugin syncs with, has its own license.

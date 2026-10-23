@@ -20,7 +20,7 @@ holds what was left of closed groups.
 Don't read, list or change anything else in the vault, and never read the plugin's `data.json`
 yourself (it holds sync tokens; the scripts read only its folder paths).
 
-The plugin's README (`obsidian-plugin/README.md` in the Chalkenso repository) explains every
+The plugin's README (in its repository, chalkenso-obsidian) explains every
 property and folder below.
 
 ## How the curriculum is stored

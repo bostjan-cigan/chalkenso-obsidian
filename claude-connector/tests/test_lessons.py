@@ -1,6 +1,6 @@
 """lessons.py: what changed since a pull, sent once, sent again after a new change, and the Stop hook.
 
-  python3 -m unittest discover -s obsidian-plugin/claude-connector/tests
+  python3 -m unittest discover -s claude-connector/tests   (in the plugin's folder)
 """
 
 import importlib
