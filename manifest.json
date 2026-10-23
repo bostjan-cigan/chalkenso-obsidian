@@ -1,7 +1,7 @@
 {
   "id": "chalkenso",
   "name": "Chalkenso",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.4.0",
   "description": "Sync course curricula with Chalkenso: lessons, arcs and images both ways, group curricula, and reviewer feedback with revision plans.",
   "author": "Boštjan Cigan",
