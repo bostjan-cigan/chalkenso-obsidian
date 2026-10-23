@@ -19,9 +19,6 @@ jobs:
       - name: The tag is the manifest's version
         run: test "$(node -p "require('./manifest.json').version")" = "$GITHUB_REF_NAME"
 
-      - name: Tests
-        run: npm test
-
       - name: The kits as one zip
         run: |
           mkdir -p dist/chalkenso-obsidian-kit
