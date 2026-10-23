@@ -1,0 +1,36 @@
+# A release for every version tag (the version in manifest.json, e.g. 0.1.0): what Obsidian installs
+# (main.js, manifest.json, styles.css) and the Claude Code kits as one zip, laid out as the Obsidian
+# guide says (chalkenso-obsidian-kit/claude and chalkenso-obsidian-kit/claude-connector).
+name: Release
+
+on:
+  push:
+    tags: ['*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag is the manifest's version
+        run: test "$(node -p "require('./manifest.json').version")" = "$GITHUB_REF_NAME"
+
+      - name: Tests
+        run: npm test
+
+      - name: The kits as one zip
+        run: |
+          mkdir -p dist/chalkenso-obsidian-kit
+          cp -R claude claude-connector dist/chalkenso-obsidian-kit/
+          rm -rf dist/chalkenso-obsidian-kit/*/tests
+          find dist -name '__pycache__' -prune -exec rm -rf {} +
+          (cd dist && zip -qr ../chalkenso-obsidian-kit.zip chalkenso-obsidian-kit)
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css chalkenso-obsidian-kit.zip --title "$GITHUB_REF_NAME" --generate-notes

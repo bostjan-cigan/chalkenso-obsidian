@@ -321,28 +321,6 @@ know those lessons, so:
 - Feedback notes from the old server are moved to Obsidian's trash by the next feedback pull; their
   tasks stay on the old server.
 
-<!-- cloud:start -->
-### Moving from Site Sync
-
-1. **In Site Sync**, untick the curriculum and group folders under *What to sync* and save (blog and
-   projects stay there). From now on only Chalkenso may map these folders.
-2. **In Chalkenso**, create the course with the same slug, its version(s) and its arcs if you like
-   (missing arcs are created on upload), and the groups.
-3. **In this plugin**, add your organisation with its sync token, and set the root folder to the
-   folder that holds your organisation's folder (for example `Website`).
-4. **Move the folders into the organisation's folder** in Obsidian: curriculum folders into
-   `<root>/<Organisation>/Curriculums/`, group folders into `<root>/<Organisation>/Groups/` (the
-   plugin creates both once the organisation's account loads).
-5. **Map each folder to its version**: tick the version under *What to sync* (a folder named
-   `<course> – <version>` is reused), or run **Map folder to a curriculum version** for a folder with
-   another name.
-6. **Disconnect**: the first sync offers it; you can also run **Disconnect folder from its previous
-   server** yourself.
-7. **Upload** the folder. Missing arcs are created first, then the lessons, in the folder's order.
-8. **Feedback-driven groups with no revisions yet:** delete the old local group folder and tick the
-   group under *What to sync*; the plugin downloads Chalkenso's group copy fresh.
-<!-- cloud:end -->
-
 ## When something goes wrong
 
 - **Notices say what happened**, for example "Can't reach http://localhost:3100 (connection refused).

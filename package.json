@@ -1,0 +1,9 @@
+{
+  "name": "chalkenso-obsidian",
+  "private": true,
+  "description": "Chalkenso for Obsidian: the plugin and its Claude Code kits.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/organisations.test.cjs && node tests/feedback.test.cjs && python3 -m unittest discover -s claude-connector/tests"
+  }
+}
