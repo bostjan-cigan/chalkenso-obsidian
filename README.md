@@ -23,10 +23,13 @@ The plugin is a single `main.js` with no build step, plus `manifest.json` and `s
 
 ## Install
 
-1. Download `main.js`, `manifest.json` and `styles.css` from this repository's
-   [latest release](../../releases/latest).
-2. Put them in `<vault>/.obsidian/plugins/chalkenso/` (create the folder).
-3. In Obsidian, open **Settings → Community plugins**, reload the list and enable **Chalkenso**.
+1. Download `chalkenso-plugin.zip` from this repository's [latest release](../../releases/latest)
+   and unzip it into `<vault>/.obsidian/plugins/` (Obsidian hides the `.obsidian` folder: **Settings →
+   Community plugins → Installed plugins**, the folder icon, opens `plugins`). That gives
+   `<vault>/.obsidian/plugins/chalkenso/` with `main.js`, `manifest.json` and `styles.css`, which the
+   release also has one by one.
+2. In Obsidian, open **Settings → Community plugins**, turn on community plugins if they're off, reload
+   the list and enable **Chalkenso**.
 
 To follow changes as they come, clone this repository and make `<vault>/.obsidian/plugins/chalkenso`
 a symbolic link to it: Obsidian then keeps the plugin's settings, `data.json`, next to the code, and

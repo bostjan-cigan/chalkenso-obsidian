@@ -1,6 +1,7 @@
 # A release for every version tag (the version in manifest.json, e.g. 0.1.0): what Obsidian installs
-# (main.js, manifest.json, styles.css) and the Claude Code kits as one zip, laid out as the Obsidian
-# guide says (chalkenso-obsidian-kit/claude and chalkenso-obsidian-kit/claude-connector).
+# (main.js, manifest.json, styles.css), the same three as one zip (a chalkenso/ folder to unzip into a
+# vault's .obsidian/plugins), and the Claude Code kits as one zip, laid out as the Obsidian guide says
+# (chalkenso-obsidian-kit/claude and chalkenso-obsidian-kit/claude-connector).
 name: Release
 
 on:
@@ -19,6 +20,12 @@ jobs:
       - name: The tag is the manifest's version
         run: test "$(node -p "require('./manifest.json').version")" = "$GITHUB_REF_NAME"
 
+      - name: The plugin as one zip
+        run: |
+          mkdir -p dist/plugin/chalkenso
+          cp main.js manifest.json styles.css dist/plugin/chalkenso/
+          (cd dist/plugin && zip -qr ../../chalkenso-plugin.zip chalkenso)
+
       - name: The kits as one zip
         run: |
           mkdir -p dist/chalkenso-obsidian-kit
@@ -30,4 +37,4 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css chalkenso-obsidian-kit.zip --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css chalkenso-plugin.zip chalkenso-obsidian-kit.zip --title "$GITHUB_REF_NAME" --generate-notes
