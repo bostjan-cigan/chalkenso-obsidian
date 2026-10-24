@@ -1,27 +1,83 @@
-# Chalkenso for Obsidian
+<p align="center">
+  <img src="docs/images/logo.svg" width="128" height="128" alt="Chalkenso logo: an ensō drawn in chalk">
+</p>
 
-Write your course curricula in Obsidian and keep them in sync with [Chalkenso](https://chalkenso.com):
+<h1 align="center">Chalkenso for Obsidian</h1>
 
-- **Lessons, both ways.** Each course version (a *workspace*) and each group curriculum syncs with its
-  own folder. Upload your edits; download changes made in Chalkenso. A lesson changed on both sides
-  becomes a conflict you settle yourself, never a silent overwrite.
-- **Arcs and images.** A lesson's `arc` property places it in its arc (missing arcs are created when
-  you upload). Images in the body are uploaded once and fetched back into the vault when missing.
-- **Feedback with revision plans.** Reviewer comments arrive as one checklist note per lesson, where
-  you (or an assistant) write the plan for each item. Plans and ticks go back to Chalkenso.
+<p align="center">
+  <strong>Your courses as notes in your vault. Class feedback comes to you, Claude Code plans the fixes, and you sync them back when you choose.</strong>
+</p>
 
-A **sync token** (`usr_…`) acts as you in one organisation: what it may sync follows your account
-there. If you belong to several organisations, add each with its own token; each gets its own folder.
+<p align="center">
+  Obsidian plugin &nbsp;·&nbsp; two-way sync &nbsp;·&nbsp; Claude Code kit &nbsp;·&nbsp; chalkenso.com or your own server &nbsp;·&nbsp; MIT
+</p>
 
-> [!WARNING]
-> **One plugin per folder.** If you also use another sync plugin in this vault, never let both map
-> the same folder. Two plugins writing `lessonId`, `revision` and `lastSynced` into the same notes will
-> overwrite each other's ids and connect the notes to the wrong server. Remove a folder's mapping in
-> one plugin before mapping it in the other (see [Moving from another server](#moving-from-another-server)).
+<p align="center">
+  Built by <a href="https://bostjan-cigan.com">Boštjan Cigan</a>
+</p>
 
-The plugin is a single `main.js` with no build step, plus `manifest.json` and `styles.css`.
+<p align="center">
+  <a href="https://chalkenso.com"><strong>Chalkenso cloud</strong></a> &nbsp;·&nbsp;
+  <a href="https://github.com/bostjan-cigan/chalkenso"><strong>Host Chalkenso yourself</strong></a> &nbsp;·&nbsp;
+  <a href="https://chalkenso.com/docs/obsidian"><strong>The Obsidian guide</strong></a>
+</p>
 
-## Install
+<p align="center">
+  <img src="docs/images/feedback.png" width="760" alt="A lesson's feedback note in Obsidian, with an instructor note and a learner's question, and Claude Code writing the plan for both">
+</p>
+
+[Chalkenso](https://chalkenso.com) is AI-assisted curriculum design: plan courses that hold together, teach them to
+groups through private links, collect what learners say, and let AI draft the next version. This plugin brings it
+into Obsidian. Each course lives in your vault as a folder of notes you own, synced both ways with Chalkenso.
+Learner feedback and instructor notes arrive as one note per lesson, where you (or Claude Code) write the plan, and
+the fixed lesson goes back when you sync.
+
+It works with [Chalkenso cloud](https://chalkenso.com) and with the [local edition](https://github.com/bostjan-cigan/chalkenso)
+on your own server. The Claude Code kit that comes with it checks your courses for the usual curriculum gaps, plans
+feedback and applies the plans you approve, on your own Claude plan.
+
+**Contents:** [What it does](#what-it-does) · [Installation](#installation) · [User guide](#user-guide) · [Development](#development) · [License](#license)
+
+---
+
+## What it does
+
+- **Lessons as notes, both ways.** Each course version and each group's copy of it syncs with its own folder.
+  Upload your edits; download changes made in Chalkenso. A lesson changed on both sides becomes a conflict you
+  settle yourself, never a silent overwrite.
+- **Arcs and images.** A lesson's `arc` property places it in its arc (missing arcs are created when you upload).
+  Images in the body are uploaded once and fetched back into the vault when missing.
+- **Feedback in your vault.** One note per lesson with its learner feedback and instructor notes. Reply, tick what's
+  done and write the lesson's plan: it all goes back to Chalkenso.
+- **Claude Code in the vault.** The kit draws each course as a canvas and checks it for the usual failures (a
+  concept used before it's taught, a missing prerequisite, a lesson that does too much), plans feedback and applies
+  the plans you approved. It never uploads: you sync when you're ready.
+- **Several organisations.** One sync token and one folder each.
+- **Nothing lost.** Deletions go to Obsidian's trash, courses you may only read stay download-only, and developer
+  mode keeps a test server's ids apart from the real ones.
+
+### In Obsidian
+
+<p align="center">
+  <img src="docs/images/course-map.png" width="760" alt="A course drawn as a canvas in Obsidian, one lesson flagged, and Claude Code's check: a concept used before it is taught, with the fix">
+</p>
+
+<p align="center">
+  <img src="docs/images/synced.png" width="760" alt="The fixed lesson in Obsidian after a sync: one lesson uploaded, the improvement closed and its feedback done">
+</p>
+
+---
+
+# Installation
+
+## What you need
+
+- **Obsidian** 1.4 or newer, on a computer or a phone (Claude Code needs a computer).
+- A **Chalkenso** account: on [chalkenso.com](https://chalkenso.com), or on your own
+  [local edition](https://github.com/bostjan-cigan/chalkenso).
+- Optional: [**Claude Code**](https://claude.com/claude-code) and **Python 3.8** or newer, for the kit.
+
+## 1. Install the plugin
 
 1. Download `chalkenso-plugin.zip` from this repository's [latest release](../../releases/latest)
    and unzip it into `<vault>/.obsidian/plugins/` (Obsidian hides the `.obsidian` folder: **Settings →
@@ -31,11 +87,7 @@ The plugin is a single `main.js` with no build step, plus `manifest.json` and `s
 2. In Obsidian, open **Settings → Community plugins**, turn on community plugins if they're off, reload
    the list and enable **Chalkenso**.
 
-To follow changes as they come, clone this repository and make `<vault>/.obsidian/plugins/chalkenso`
-a symbolic link to it: Obsidian then keeps the plugin's settings, `data.json`, next to the code, and
-`.gitignore` keeps it out of git.
-
-## Connect
+## 2. Connect it
 
 1. In Chalkenso, switch to the organisation you want (the card at the top of the sidebar), open
    **Tokens** at the bottom of the admin sidebar (`/admin/api-tokens`), give the token a name (for
@@ -48,7 +100,50 @@ a symbolic link to it: Obsidian then keeps the plugin's settings, `data.json`, n
 3. Each organisation shows who its token signs in as and its folder. **Refresh** reloads it, the bin
    removes it (its folders stop syncing and stay in your vault), and pasting a new token into its
    field replaces the token. A token of another organisation is refused there: add it as another
-   organisation instead. Repeat step 1–2 for every organisation you belong to.
+   organisation instead. Repeat steps 1–2 for every organisation you belong to.
+
+A **sync token** (`usr_…`) acts as you in one organisation: what it may sync follows your account there.
+
+<p align="center">
+  <img src="docs/images/connect.png" width="640" alt="Obsidian's Settings → Chalkenso: the server, the organisation, the root folder and what to sync">
+</p>
+
+> [!WARNING]
+> **One plugin per folder.** If you also use another sync plugin in this vault, never let both map
+> the same folder. Two plugins writing `lessonId`, `revision` and `lastSynced` into the same notes will
+> overwrite each other's ids and connect the notes to the wrong server. Remove a folder's mapping in
+> one plugin before mapping it in the other (see [Moving from another server](#moving-from-another-server)).
+
+## 3. Choose what to sync
+
+Under **Settings → Chalkenso → What to sync**, tick the course versions and group curricula you want in this vault
+and click **Save**. Each one gets its own folder ([Folders](#folders) shows where) and is downloaded right away.
+
+From then on, **Sync current folder** (in the command palette, or click the Chalkenso item in the status bar)
+uploads your edits, downloads Chalkenso's and pulls the feedback.
+
+## 4. Add Claude Code (optional)
+
+From a copy of this repository, or `chalkenso-obsidian-kit.zip` from the [latest release](../../releases/latest):
+
+```bash
+python3 claude/install.py "<path to your vault>"
+```
+
+Open Claude Code in the vault and start with *"run enrich-lessons on Web Development"* (your course's name).
+[Claude Code](#claude-code) has what the kit installs and how to keep it up to date. On chalkenso.com, Claude Code
+can also work through the connector, without the plugin: see
+[Through the connector](#through-the-connector-chalkensocom).
+
+## Updating
+
+Put the new release's `main.js`, `manifest.json` and `styles.css` over the old ones (or `git pull` in your clone),
+then turn the plugin off and on in **Settings → Community plugins**. Run the kit's installer again to get the latest
+skills.
+
+---
+
+# User guide
 
 ## Folders
 
@@ -333,6 +428,16 @@ know those lessons, so:
   problems** and **Show recent sync problems**; clicking an error notice opens the list.
 - **Full details** go to the developer console (Cmd+Opt+I / Ctrl+Shift+I).
 
+---
+
+# Development
+
+The plugin is a single `main.js` with no build step, plus `manifest.json` and `styles.css`.
+
+To follow changes as they come, clone this repository and make `<vault>/.obsidian/plugins/chalkenso`
+a symbolic link to it: Obsidian then keeps the plugin's settings, `data.json`, next to the code, and
+`.gitignore` keeps it out of git.
+
 ## Sync API
 
 Every request sends `Authorization: Bearer usr_…`; curriculum requests also send
@@ -363,6 +468,9 @@ curriculum; the plugin then cleans up that group's folder.
 In this folder: `node tests/organisations.test.cjs`, `node tests/feedback.test.cjs` (the plugin against
 a stand-in for Obsidian and a fake sync API) and `python3 -m unittest discover -s claude-connector/tests`.
 
-## License
+---
 
-[MIT](LICENSE). Chalkenso itself, the app this plugin syncs with, has its own license.
+# License
+
+[MIT](LICENSE). Chalkenso itself, the app this plugin syncs with, has its own license: the
+[local edition](https://github.com/bostjan-cigan/chalkenso) is source-available and free for personal use.
